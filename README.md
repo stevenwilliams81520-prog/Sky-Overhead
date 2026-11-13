@@ -1,24 +1,22 @@
 # Sky Overhead – iPhone app
 
-The same app as the Google Apps Script version, packaged with Capacitor so the
-motion sensors, camera and live GPS work. Apps Script stays as the server.
+Satellites, stars, Sun & Moon, tides and lightning, with Sky view (point the
+phone at the sky). Standalone: everything runs on the phone, no Apps Script needed.
 
-## One-time setup
-1. In Apps Script, replace Code.gs with the new one, then
-   Deploy → Manage deployments → ✏️ → Version: New version → Deploy.
-   "Who has access" must be **Anyone**. Copy the Web app URL (ends in /exec).
-2. Paste that URL into `src/app-config.js`.
-3. In App Store Connect, create the app with bundle ID `com.stevenwilliams.skyoverhead`
-   (or change it in `capacitor.config.json` and `codemagic.yaml` to one you prefer).
-   Put its Apple ID number in `codemagic.yaml` (APP_STORE_APPLE_ID).
-4. Push this folder to GitHub and run the "Sky Overhead iOS" workflow in Codemagic.
-   It builds and sends the app to TestFlight.
-
-## Updating later
-Copy the latest Index.html and StarData.html from Apps Script into `src/`, push, and build again.
+## Build
+1. Push this folder to GitHub.
+2. Run the "Sky Overhead iOS" workflow in Codemagic. It builds the app and sends it to TestFlight.
 
 ## Files
-- `src/` – the Apps Script page files, plus app-config.js (your server URL)
-- `build-www.js` – turns src into the app's `www` folder
-- `assets/icon-only.png`, `assets/splash.png` – app icon and launch screen (Codemagic makes all the sizes)
+- `src/Index.html`, `src/StarData.html` – the app's page and star catalogue
+- `src/local-server.js` – fetches the data on the phone (CelesTrak, Open-Meteo,
+  EUMETSAT, Wikipedia, OpenStreetMap) and keeps it for a while
+- `build-www.js` – puts the page, data code and libraries into the `www` folder
+- `assets/icon-only.png`, `assets/splash.png` – app icon and launch screen
+- `capacitor.config.json` – app name and ID; native HTTP switched on
 - `codemagic.yaml` – the cloud build for TestFlight
+
+## Data sources
+Satellites: CelesTrak. Tides: Open-Meteo (Météo-France model). Lightning: EUMETSAT.
+Encyclopedia: Wikipedia (CC BY-SA). Place names and maps: © OpenStreetMap contributors.
+Star catalogue: HYG database via d3-celestial.
