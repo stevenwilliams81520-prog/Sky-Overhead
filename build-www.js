@@ -26,7 +26,11 @@ swap(/<link rel="stylesheet" href="[^"]*leaflet[^"]*\.css">/, '<link rel="styles
 swap(/<script src="[^"]*leaflet[^"]*\.js"><\/script>/, '<script src="lib/leaflet.js"></script>');
 swap(/<\?!= include\('StarData'\); \?>/, src('StarData.html'));
 
-const shim = `<script src="app-config.js"></script>
+// Apps Script adds this for the web version; the app needs it in the page itself,
+// otherwise iPhone shows the page at desktop width (really zoomed out)
+const viewport = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n' +
+                 '<meta name="theme-color" content="#0C1726">\n';
+const shim = viewport + `<script src="app-config.js"></script>
 <script>
 // Stand-in for Apps Script's google.script.run: calls the same server functions over the web
 (function () {

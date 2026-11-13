@@ -176,6 +176,16 @@
   #svStart { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 14px; padding: 30px; text-align: center; background: rgba(4,6,12,.9); }
   #svStart[hidden] { display: none; }
+  #svFind { position: absolute; left: 14px; right: 14px; top: calc(54px + env(safe-area-inset-top, 0px)); }
+  #svFind form { display: flex; gap: 8px; }
+  #svQ { flex: 1; min-width: 0; width: auto; background: rgba(22,42,68,.92); }
+  #svRes { list-style: none; margin: 6px 0 0; padding: 0; background: rgba(19,37,61,.96); border-radius: 8px;
+    overflow: hidden; max-height: 50vh; overflow-y: auto; }
+  #svRes:empty { display: none; }
+  #svRes button { width: 100%; display: flex; justify-content: space-between; gap: 10px; text-align: left;
+    background: none; border: 0; border-bottom: 1px solid #1C3352; border-radius: 0; padding: 11px 12px; }
+  #svRes .k { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+  #svRes .msg { padding: 10px 12px; color: var(--muted); }
   #svStart p { max-width: 360px; line-height: 1.5; margin: 0; }
   .moreBtn { margin-top: 12px; }
   .more { margin-top: 12px; padding-top: 12px; border-top: 1px solid #1C3352; overflow: hidden; }
@@ -409,6 +419,12 @@
   <div id="svTop">
     <span id="svStatus"></span>
     <button id="svClose" type="button" aria-label="Close sky view">✕ Close</button>
+  </div>
+  <div id="svFind">
+    <form id="svFindForm" role="search">
+      <input id="svQ" type="search" placeholder="Find a star, planet, cluster or satellite" autocomplete="off" aria-label="Find in the sky">
+    </form>
+    <ul id="svRes"></ul>
   </div>
   <div id="svBottom">
     <div id="svCard"><div><div class="t" id="svName"></div><small id="svSub"></small></div>
@@ -2303,22 +2319,24 @@ function svFrame() {
   const zoomK = 60 / sv.vfov;
   const items = [];                                    // things that can be "in the middle"
 
-  // Ground: shade everything below the horizon
-  c.save();
-  c.fillStyle = sv.cam ? 'rgba(10,20,10,0.35)' : 'rgba(18,26,18,0.92)';
-  c.beginPath();
+  // Ground: in this projection the horizon is a straight line, and everything on one
+  // side of it is below the horizon, so clip the screen rectangle to that side.
   const hz = [];
-  for (let a = 0; a <= 360; a += 3) { const q = svProj(enu(0, a * D2R)); hz.push(q); }
-  // build the ground polygon from the visible stretch of horizon plus the screen edge nearest the ground
-  const dn = svProj(enu(-Math.PI / 2 + 0.001, 0));
-  const groundDir = [-v3.dot([0, 0, 1], sv.r), v3.dot([0, 0, 1], sv.u)];   // screen direction of "down"
-  let started = false;
-  hz.forEach(q => { if (q) { started ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y); started = true; } });
-  if (started) {
-    const gx = W / 2 + groundDir[0] * 4 * W, gy = H / 2 + groundDir[1] * 4 * H;
-    c.lineTo(gx, gy); c.closePath(); c.fill();
-  } else if (v3.dot(sv.f, [0, 0, 1]) < 0) c.fillRect(0, 0, W, H);   // looking straight down
-  c.restore();
+  for (let a = 0; a <= 360; a += 3) hz.push(svProj(enu(0, a * D2R)));
+  {
+    const foc = (H / 2) / Math.tan(sv.vfov * D2R / 2);
+    const below = (x, y) => sv.f[2] + (x - W / 2) / foc * sv.r[2] - (y - H / 2) / foc * sv.u[2];   // < 0 is ground
+    const rect = [[0, 0], [W, 0], [W, H], [0, H]], poly = [];
+    for (let k = 0; k < 4; k++) {
+      const A = rect[k], B = rect[(k + 1) % 4], fa = below(A[0], A[1]), fb = below(B[0], B[1]);
+      if (fa < 0) poly.push(A);
+      if ((fa < 0) !== (fb < 0)) { const t = fa / (fa - fb); poly.push([A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]); }
+    }
+    if (poly.length > 2) {
+      c.fillStyle = sv.cam ? 'rgba(10,20,10,0.35)' : 'rgba(18,26,18,0.92)';
+      c.beginPath(); poly.forEach((p2, k) => k ? c.lineTo(p2[0], p2[1]) : c.moveTo(p2[0], p2[1])); c.closePath(); c.fill();
+    }
+  }
   // Horizon line and compass points
   c.strokeStyle = 'rgba(200,165,94,0.8)'; c.lineWidth = 1.5;
   c.beginPath(); let pen = false;
@@ -2403,7 +2421,8 @@ function svFrame() {
     const d = new Date(now), obs = observer(), sun = sunEci(d), gmst = satellite.gstime(d), dark = sunEl < -6;
     const bL = bortleLimit();
     for (const s of sats) {
-      if (s !== selected && s.now && s.now.el < SKIP_EL && now - s.checked < RECHECK) continue;
+      const isTarget = sv.target && sv.target.sat === s;
+      if (s !== selected && !isTarget && s.now && s.now.el < SKIP_EL && now - s.checked < RECHECK) continue;
       const p = look(s, d, obs);
       s.checked = s.checked ? now : now - Math.random() * RECHECK;
       s.now = p;
@@ -2444,23 +2463,43 @@ function svFrame() {
   sv.centre = best;
 
   // Arrow to the chosen object when it's off screen
+  // Finding something: the edge of the screen glows red on the side to turn towards,
+  // brighter the closer you get. Once it's on screen it gets a pulsing red ring.
   const tg = sv.target && svTargetVec(sv.target, now);
   if (tg) {
     const q = svProj(tg);
-    if (!svOn(q, -30)) {
+    const pulse = 0.5 + 0.5 * Math.sin(now / 250);
+    if (!svOn(q, -40)) {
       let dx = v3.dot(tg, sv.r), dy = -v3.dot(tg, sv.u);
       const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
-      const R = Math.min(W, H) / 2 - 50, ax = W / 2 + dx * R, ay = H / 2 + dy * R;
-      c.save(); c.translate(ax, ay); c.rotate(Math.atan2(dy, dx));
-      c.fillStyle = '#FFB45C'; c.beginPath(); c.moveTo(16, 0); c.lineTo(-10, -10); c.lineTo(-10, 10); c.closePath(); c.fill();
-      c.restore();
-      c.fillStyle = '#FFD9A8'; c.font = '13px Jost, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillText(svName(sv.target), ax - dx * 30, ay - dy * 30);
+      const tx = dx ? (dx > 0 ? (W / 2) / dx : (-W / 2) / dx) : Infinity;   // where that direction meets the screen edge
+      const ty = dy ? (dy > 0 ? (H / 2) / dy : (-H / 2) / dy) : Infinity;
+      const t = Math.min(tx, ty), ex = W / 2 + dx * t, ey = H / 2 + dy * t;
+      const ang = Math.acos(Math.max(-1, Math.min(1, v3.dot(tg, sv.f)))) * R2D;
+      const strength = 0.45 + 0.45 * (1 - ang / 180) + 0.1 * pulse;
+      const gr = c.createRadialGradient(ex, ey, 0, ex, ey, Math.min(W, H) * 0.55);
+      gr.addColorStop(0, 'rgba(255,40,40,' + strength.toFixed(2) + ')');
+      gr.addColorStop(0.35, 'rgba(255,30,30,' + (strength * 0.35).toFixed(2) + ')');
+      gr.addColorStop(1, 'rgba(255,0,0,0)');
+      c.fillStyle = gr; c.fillRect(0, 0, W, H);
+      // a solid red strip right on that edge
+      c.strokeStyle = 'rgba(255,60,60,' + (0.6 + 0.4 * pulse).toFixed(2) + ')'; c.lineWidth = 8;
+      c.beginPath();
+      if (t === tx) { const x = dx > 0 ? W - 2 : 2; c.moveTo(x, Math.max(0, ey - 90)); c.lineTo(x, Math.min(H, ey + 90)); }
+      else { const y = dy > 0 ? H - 2 : 2; c.moveTo(Math.max(0, ex - 90), y); c.lineTo(Math.min(W, ex + 90), y); }
+      c.stroke();
+      const lx = W / 2 + dx * Math.min(t - 70, Math.min(W, H) * 0.32), ly = H / 2 + dy * Math.min(t - 70, Math.min(W, H) * 0.32);
+      c.fillStyle = '#FFD0D0'; c.font = '500 15px Jost, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(svName(sv.target), lx, ly);
+      c.font = '13px Jost, system-ui, sans-serif';
+      c.fillText((tg[2] < 0 ? 'below the horizon · ' : '') + Math.round(ang) + '° away', lx, ly + 18);
     } else if (q) {
-      c.strokeStyle = '#FFB45C'; c.lineWidth = 2; c.beginPath(); c.arc(q.x, q.y, 14, 0, 2 * Math.PI); c.stroke();
+      c.strokeStyle = 'rgba(255,60,60,' + (0.6 + 0.4 * pulse).toFixed(2) + ')'; c.lineWidth = 3;
+      c.beginPath(); c.arc(q.x, q.y, 16 + 6 * pulse, 0, 2 * Math.PI); c.stroke();
+      c.lineWidth = 1.5; c.beginPath(); c.arc(q.x, q.y, 30 + 10 * pulse, 0, 2 * Math.PI); c.stroke();
     }
   }
-  svCard(sv.target && (now - sv.tapT < 8000 || !best) ? sv.target : best);
+  svCard(sv.target && (sv.searched || now - sv.tapT < 8000 || !best) ? sv.target : best, tg);
 
   // Status line
   const view = enuToElAz(sv.f);
@@ -2483,7 +2522,7 @@ function svTargetVec(it, now) {
   if (it.o) { const d = (sv.dsoVec || []).find(x => x.d === it.o); return d ? d.v : null; }
   return sv.starVec ? [sv.starVec[it.i * 4], sv.starVec[it.i * 4 + 1], sv.starVec[it.i * 4 + 2]] : null;
 }
-function svCard(it) {
+function svCard(it, tgv) {
   const card = $('svCard');
   if (!it) { card.classList.remove('has'); sv.cardIt = null; return; }
   sv.cardIt = it;
@@ -2500,6 +2539,7 @@ function svCard(it) {
     const mag = STARS[it.i * 4 + 2] / 100;
     sub = 'Star, ' + magText(mag) + ', ' + brightnessWords(mag);
   }
+  if (it === sv.target && tgv && tgv[2] < 0) sub += ' · below the horizon right now';
   const name = svName(it);
   if (card.dataset.t !== name + sub) { card.dataset.t = name + sub; $('svName').textContent = name; $('svSub').textContent = sub; }
   card.classList.add('has');
@@ -2621,7 +2661,7 @@ function svTap(x, y) {
     if (sc < bs) { bs = sc; best = d; }
   }
   sv.target = best ? { sat: best.sat, o: best.o, i: best.i, v: best.v } : null;
-  sv.tapT = Date.now();
+  sv.tapT = Date.now(); sv.searched = false;
 }
 // "Details": leave sky view and open the full details for that object
 function svDetails() {
@@ -2635,6 +2675,65 @@ function svDetails() {
     setTimeout(() => $('starInfo').scrollIntoView({ behavior: 'smooth' }), 80);
   }
 }
+/* ---------- find something in sky view ---------- */
+function svSearch(q) {
+  q = q.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const res = [], score = (name) => { const n = name.toLowerCase(); return n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : -1; };
+  (sv.bodies || BODIES).forEach(b => {
+    const sc = score(b.name === 'Moon' ? 'Moon' : b.name);
+    if (sc >= 0) res.push({ sc: sc - 0.5, label: b.name === 'Moon' ? 'The Moon' : b.name,
+      kind: b.name === 'Sun' ? 'our star' : b.name === 'Moon' ? 'moon' : 'planet',
+      it: { o: Object.assign({ kind: b.name === 'Sun' ? 'sun' : b.name === 'Moon' ? 'moon' : 'planet' }, b) } });
+  });
+  DSOS.forEach(d => {
+    const sc = Math.min(...[d.name, d.short].map(score).map(x => x < 0 ? 9 : x));
+    if (sc < 9) res.push({ sc, label: d.name, kind: d.type.toLowerCase(), it: { o: d } });
+  });
+  Object.keys(STAR_NAMES).forEach(k => {
+    const sc = score(STAR_NAMES[k]);
+    if (sc >= 0) res.push({ sc: sc + STARS[k * 4 + 2] / 1000, label: STAR_NAMES[k], kind: 'star, ' + magText(STARS[k * 4 + 2] / 100), it: { i: Number(k) } });
+  });
+  let n = 0;
+  for (const s of sats) {
+    if (n > 40) break;
+    const sc = score(s.name);
+    if (sc >= 0) { n++; res.push({ sc: sc + 0.3, label: s.name, kind: 'satellite', it: { sat: s } }); }
+  }
+  res.sort((a, b) => a.sc - b.sc || a.label.localeCompare(b.label));
+  return res.slice(0, 8);
+}
+function svShowResults() {
+  const q = $('svQ').value, ul = $('svRes');
+  ul.textContent = '';
+  if (q.trim().length < 2) return;
+  const r = svSearch(q);
+  if (!r.length) { const li = document.createElement('li'); li.className = 'msg'; li.textContent = 'Nothing found called “' + q.trim() + '”.'; ul.append(li); return; }
+  r.forEach(x => {
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.type = 'button';
+    const a = document.createElement('span'); a.textContent = x.label;
+    const k = document.createElement('span'); k.className = 'k'; k.textContent = x.kind;
+    b.append(a, k);
+    b.addEventListener('click', () => svFindPick(x));
+    li.append(b); ul.append(li);
+  });
+}
+function svFindPick(x) {
+  sv.target = x.it; sv.searched = true; sv.tapT = Date.now();
+  $('svRes').textContent = '';
+  $('svQ').value = x.label;
+  $('svQ').blur();
+}
+$('svQ').addEventListener('input', svShowResults);
+$('svQ').addEventListener('focus', svShowResults);
+$('svFindForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const r = svSearch($('svQ').value);
+  if (r.length) svFindPick(r[0]); else svShowResults();
+});
+$('svQ').addEventListener('search', () => { if (!$('svQ').value) { sv.target = null; sv.searched = false; $('svRes').textContent = ''; } });
+
 $('skyBtn').addEventListener('click', svOpen);
 $('svClose').addEventListener('click', svClose);
 $('svGo').addEventListener('click', svStartSensors);
