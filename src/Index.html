@@ -1,0 +1,2914 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/satellite.js@6.0.2/dist/satellite.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+<style>
+  :root {
+    --bg: #0C1726; --panel: #13253D; --field: #162A44; --grid: #26456A;
+    --brass: #C8A55E; --ink: #DCE6EE; --muted: #8197AD;
+    --sat: #F4F7FA; --hot: #FFB45C;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: 'Jost', system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+  body { padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  h1 { font-size: 1.6rem; font-weight: 500; margin: 0; }
+  #clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #where { color: var(--muted); font-size: .95rem; margin: 2px 0 12px; }
+  #dialWrap { position: relative; width: 100%; aspect-ratio: 1 / 1; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; cursor: pointer; }
+  /* Zoomed: the dial breaks out of the page and takes over the whole screen */
+  #dialWrap.zoomed { position: fixed; inset: 0; width: auto; aspect-ratio: auto; z-index: 9000; background: var(--bg); }
+  #dialWrap.zoomed canvas { touch-action: none; cursor: grab; }
+  html.zooming, html.zooming body { overflow: hidden; }
+  #zoomCtl { position: absolute; right: 2px; bottom: 2px; display: flex; flex-direction: column; gap: 8px; z-index: 2; }
+  #dialWrap.zoomed #zoomCtl { right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  #zoomCtl button { width: 42px; height: 42px; padding: 0; font-size: 1.3rem; line-height: 1; border-radius: 50%;
+    background: rgba(22,42,68,.88); }
+  #zoomOut, #zoomClose { display: none; }
+  #dialWrap.zoomed #zoomOut, #dialWrap.zoomed #zoomClose { display: block; }
+  #zoomCap { position: absolute; left: calc(14px + env(safe-area-inset-left, 0px)); right: 72px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px)); padding: 10px 14px; border-radius: 8px;
+    background: rgba(19,37,61,.9); border-left: 3px solid var(--hot); cursor: pointer; display: none; }
+  #dialWrap.zoomed #zoomCap.has { display: block; }
+  #zoomCap small { display: block; color: var(--muted); }
+  #status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 22%; color: var(--ink); pointer-events: none; line-height: 1.4; }
+  .hint { color: var(--muted); font-size: .88rem; margin: 6px 0 0; line-height: 1.45; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  select, button, input { font: inherit; color: var(--ink); background: var(--field);
+    border: 1px solid var(--grid); border-radius: 8px; padding: 8px 12px; }
+  input { width: 100%; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  #locForm { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 14px; }
+  #locForm[hidden], #info[hidden] { display: none; }
+  #locForm label { color: var(--muted); font-size: .85rem; display: grid; gap: 4px; }
+  #locMsg { grid-column: 1 / -1; margin: 0; }
+  #info { border-left: 3px solid var(--hot); padding: 10px 14px; margin: 0 0 14px;
+    background: var(--panel); border-radius: 0 8px 8px 0; }
+  #info h2 { margin: 0 0 6px; font-size: 1.2rem; font-weight: 500; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 16px; margin: 0; font-variant-numeric: tabular-nums; }
+  dt { color: var(--muted); } dd { margin: 0; }
+  #map { height: 260px; margin-top: 12px; border-radius: 8px; background: #0F1F36;
+    color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  #map.leaflet-container { display: block; font-family: inherit; }
+  #map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9) saturate(0.6); }
+  .leaflet-control-attribution { background: rgba(12,23,38,.75) !important; color: var(--muted) !important; }
+  .leaflet-control-attribution a { color: var(--brass) !important; }
+  .leaflet-bar a { background: var(--field) !important; color: var(--ink) !important; border-color: var(--grid) !important; }
+  #mapKey { margin: 6px 0 0; }
+  #altBox { margin: 0 0 16px; }
+  #searchForm { display: flex; gap: 8px; margin: 0 0 8px; }
+  #searchForm input { flex: 1; min-width: 0; width: auto; }
+  #results { list-style: none; padding: 0; margin: 0 0 12px; background: var(--panel); border-radius: 8px; overflow: hidden; }
+  #results:empty { display: none; }
+  #results button { width: 100%; display: flex; justify-content: space-between; gap: 12px; text-align: left;
+    background: none; border: 0; border-bottom: 1px solid #1C3352; border-radius: 0; padding: 10px 12px; }
+  #results li:last-child button { border-bottom: 0; }
+  #results .rid { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #results .msg { padding: 10px 12px; color: var(--muted); }
+  #info h3 { margin: 14px 0 4px; }
+  #passNote { margin: 0 0 4px; color: var(--ink); }
+  #passes { list-style: none; padding: 0; margin: 0; }
+  #passes li { padding: 8px 0; border-bottom: 1px solid #1C3352; }
+  #passes li:last-child { border-bottom: 0; }
+  #passes .pt { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+  #passes .pd { color: var(--muted); font-size: .9rem; margin-top: 2px; }
+  .badge { border: 1px solid var(--brass); color: var(--brass); border-radius: 999px; padding: 0 8px; font-size: .8rem; white-space: nowrap; }
+  .altHead { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
+  #altLabel { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .dual { position: relative; height: 34px; margin: 0 10px; }
+  .dual .track { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px;
+    background: var(--grid); border-radius: 2px; }
+  #altFill { position: absolute; top: 0; bottom: 0; background: var(--brass); border-radius: 2px; }
+  .dual input { position: absolute; left: -10px; width: calc(100% + 20px); top: 0; height: 34px;
+    margin: 0; padding: 0; background: none; border: 0; pointer-events: none;
+    -webkit-appearance: none; appearance: none; }
+  .dual input::-webkit-slider-runnable-track { background: none; height: 34px; }
+  .dual input::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 22px; height: 22px;
+    margin-top: 6px; border-radius: 50%; background: var(--brass); border: 3px solid var(--bg); cursor: pointer; }
+  .dual input::-moz-range-track { background: none; }
+  .dual input::-moz-range-thumb { pointer-events: auto; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--brass); border: 3px solid var(--bg); cursor: pointer; }
+  .ticks { position: relative; height: 16px; margin: 0 10px; font-size: 11px; color: #4F6884; }
+  .ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .ticks span.on { color: var(--ink); }
+  .key { display: inline-block; width: 18px; height: 0; vertical-align: middle; margin: 0 4px 0 0; }
+  #slBtn[aria-pressed="true"] { border-color: #7CC4FF; color: #BFE2FF; background: #16324F; }
+  #slSummary { color: #9ACFFF; margin: 0 0 6px; }
+  h3 { font-size: 1.05rem; font-weight: 500; margin: 8px 0 4px; }
+  #list { list-style: none; padding: 0; margin: 0; }
+  #list li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 4px;
+    border-bottom: 1px solid #1C3352; cursor: pointer; }
+  #list li.sel { color: var(--hot); }
+  #list .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 9px;
+    vertical-align: middle; background: #4F6884; }
+  #list li.vis .dot { background: var(--sat); box-shadow: 0 0 6px var(--sat); }
+  #list .pos { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #empty { color: var(--muted); margin: 4px 0; }
+
+  /* mode tabs and red light */
+  .modeBar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 12px; }
+  .tabs { display: inline-flex; border: 1px solid var(--grid); border-radius: 8px; overflow: hidden; }
+  .tabs button { border: 0; border-radius: 0; background: none; padding: 8px 16px; color: var(--muted); }
+  .tabs button[aria-selected="true"] { background: var(--field); color: var(--brass); }
+  #redBtn[aria-pressed="true"] { border-color: #C0392B; color: #FF8A80; }
+  body[data-mode="stars"] .satOnly, body[data-mode="sats"] .starOnly { display: none !important; }
+  body[data-mode="stars"] #status { display: none; }
+  body[data-mode="sun"] .satOnly, body[data-mode="sun"] .starOnly,
+  body[data-mode="sun"] #dialWrap, body[data-mode="sun"] #flipBtn,
+  body[data-mode="sun"] #skySel, body[data-mode="sun"] #bortleNote,
+  body:not([data-mode="sun"]) .sunOnly { display: none !important; }
+  .modeBar { flex-wrap: wrap; }
+  .tabs button { padding: 8px 12px; }
+
+  /* sun & moon tab */
+  .card { background: var(--panel); border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
+  .card h2 { margin: 0 0 4px; font-size: 1.25rem; font-weight: 500; color: var(--brass); }
+  .big { font-size: 1.15rem; margin: 2px 0 4px; }
+  .evList { list-style: none; padding: 0; margin: 8px 0 0; }
+  .evList li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    padding: 8px 0; border-bottom: 1px solid #1C3352; font-variant-numeric: tabular-nums; }
+  .evList li:last-child { border-bottom: 0; }
+  .evList .when { color: var(--muted); font-size: .9rem; display: block; }
+  .evList .cd { color: var(--ink); white-space: nowrap; text-align: right; }
+  .evList li.next .cd { color: var(--hot); }
+  .evList li.none .cd { color: var(--muted); white-space: normal; font-size: .85rem; }
+  .moonRow { display: flex; gap: 16px; align-items: center; }
+  #moonIcon { flex: 0 0 auto; }
+  #tideChart svg { display: block; width: 100%; height: auto; margin-top: 8px; }
+  /* sky view: point the phone at the sky */
+  #skyBtn { border-color: var(--brass); color: var(--brass); }
+  body[data-mode="sun"] #skyBtn, body[data-mode="ltg"] #skyBtn { display: none; }
+  #skyView { position: fixed; inset: 0; z-index: 9100; background: #04060C; display: none; overflow: hidden;
+    touch-action: none; -webkit-user-select: none; user-select: none; }
+  #skyView.on { display: block; }
+  html.skyOn, html.skyOn body { overflow: hidden; }
+  #svVideo, #svCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #svVideo { object-fit: cover; display: none; }
+  #skyView.cam #svVideo { display: block; }
+  #svTop { position: absolute; left: 0; right: 0; top: 0; padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    background: linear-gradient(rgba(4,6,12,.75), rgba(4,6,12,0)); }
+  #svStatus { color: var(--muted); font-size: .9rem; }
+  #svBottom { position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(rgba(4,6,12,0), rgba(4,6,12,.85)); }
+  #svCard { background: rgba(19,37,61,.92); border-left: 3px solid var(--hot); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 10px; display: none; }
+  #svCard.has { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  #svCard .t { font-size: 1.1rem; }
+  #svCard small { display: block; color: var(--muted); }
+  #svBtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  #svBtns button, #svTop button { background: rgba(22,42,68,.9); }
+  #svStart { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px; padding: 30px; text-align: center; background: rgba(4,6,12,.9); }
+  #svStart[hidden] { display: none; }
+  #svStart p { max-width: 360px; line-height: 1.5; margin: 0; }
+  .moreBtn { margin-top: 12px; }
+  .more { margin-top: 12px; padding-top: 12px; border-top: 1px solid #1C3352; overflow: hidden; }
+  .more[hidden] { display: none; }
+  .more h4 { margin: 12px 0 4px; font-weight: 500; font-size: 1.05rem; color: var(--brass); }
+  .more p { line-height: 1.5; margin: 4px 0; }
+  .more a { color: var(--brass); }
+  .moreImg { float: right; max-width: 42%; max-height: 160px; border-radius: 6px; margin: 0 0 8px 12px; object-fit: cover; }
+  body[data-mode="ltg"] .satOnly, body[data-mode="ltg"] .starOnly, body[data-mode="ltg"] .sunOnly,
+  body[data-mode="ltg"] #dialWrap, body[data-mode="ltg"] #flipBtn, body[data-mode="ltg"] #skySel,
+  body[data-mode="ltg"] #bortleNote, body:not([data-mode="ltg"]) .ltgOnly { display: none !important; }
+  #ltgMap { height: 340px; border-radius: 8px; margin-top: 8px; background: #0F1F36; }
+  #ltgMap .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9) saturate(0.6); }
+  .ringLbl { color: #C8A55E; font-size: 11px; white-space: nowrap; text-shadow: 0 0 3px #000; }
+  .bigBtn { width: 100%; padding: 16px; font-size: 1.15rem; border-radius: 12px; margin-top: 8px;
+    background: #3A2E12; border: 2px solid var(--brass); color: var(--ink); }
+  .bigBtn.wait { background: #12304A; border-color: #7CC4FF; }
+  .warn { color: #FFB45C; }
+  #redOverlay { position: fixed; inset: 0; background: #A00000; mix-blend-mode: multiply;
+    pointer-events: none; z-index: 10000; display: none; }
+  html.red #redOverlay { display: block; }
+  html.red, html.red body { background: #000; }
+
+  /* stars tab */
+  #skyNote { margin: 6px 0 0; color: var(--ink); }
+  #bortleNote { margin: -6px 0 14px; }
+  #starInfo { border-left: 3px solid var(--brass); padding: 10px 14px; margin: 0 0 14px;
+    background: var(--panel); border-radius: 0 8px 8px 0; }
+  #starInfo[hidden] { display: none; }
+  #starInfo h2 { margin: 0 0 6px; font-size: 1.2rem; font-weight: 500; }
+  #starList { list-style: none; padding: 0; margin: 0; }
+  #starList li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 4px;
+    border-bottom: 1px solid #1C3352; cursor: pointer; }
+  #starList li.sel { color: var(--brass); }
+  #starList .kind { color: var(--muted); font-size: .85rem; margin-left: 6px; }
+  #starList .pos { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+</style>
+</head>
+<body data-mode="sats">
+<main>
+  <header>
+    <h1>Sky overhead</h1>
+    <span id="clock"></span>
+  </header>
+  <div class="modeBar">
+    <div class="tabs" role="tablist" aria-label="Mode">
+      <button id="tabSats" role="tab" type="button" aria-selected="true">Satellites</button>
+      <button id="tabStars" role="tab" type="button" aria-selected="false">Stars</button>
+      <button id="tabSun" role="tab" type="button" aria-selected="false">Sun &amp; Moon</button>
+      <button id="tabLtg" role="tab" type="button" aria-selected="false">Lightning</button>
+    </div>
+    <button id="redBtn" type="button" aria-pressed="false">Red light: off</button>
+  </div>
+  <p id="where"></p>
+
+  <form id="searchForm" class="satOnly" role="search">
+    <input id="searchIn" type="search" placeholder="Find a satellite, e.g. ISS or Hubble" autocomplete="off" aria-label="Satellite name or catalogue number">
+    <button type="submit">Search</button>
+  </form>
+  <ul id="results" class="satOnly" aria-live="polite"></ul>
+
+  <div id="dialWrap">
+    <canvas id="dial" aria-label="Sky view: centre is straight overhead, outer ring is the horizon"></canvas>
+    <div id="status">Loading satellites…</div>
+    <div id="zoomCap" role="button" tabindex="0"></div>
+    <div id="zoomCtl">
+      <button id="zoomClose" type="button" aria-label="Close full screen">✕</button>
+      <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+      <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+    </div>
+  </div>
+  <p class="hint satOnly">The centre is straight above you and the gold ring is the horizon. Glowing dots are sunlit satellites against a dark sky, the ones you could spot by eye. Blue dots are Starlink. Tap a dot to follow it. Pinch the dial, or tap +, to zoom in.</p>
+  <p class="hint starOnly">Bigger dots are brighter stars. Planets and the Moon are labelled, and gold rings mark galaxies, nebulas and star clusters you can see without a telescope. Tap anything for details. Pinch the dial, or tap +, to zoom in; more star names appear as you go.</p>
+  <p id="skyNote" class="hint starOnly"></p>
+
+  <div class="controls">
+    <select id="group" class="satOnly" aria-label="Satellite group">
+      <option value="active" selected>All active satellites (about 15,000)</option>
+      <option value="stations">Space stations</option>
+      <option value="last-30-days">Launched in the last 30 days</option>
+      <option value="oneweb">OneWeb</option>
+      <option value="kuiper">Amazon Kuiper</option>
+      <option value="geo">Geostationary (TV and comms)</option>
+      <option value="gnss">All navigation (GPS, Galileo, GLONASS, BeiDou)</option>
+      <option value="gps-ops">GPS only</option>
+      <option value="iridium-NEXT">Iridium</option>
+      <option value="weather">Weather</option>
+      <option value="resource">Earth observation</option>
+      <option value="amateur">Amateur radio</option>
+      <option value="science">Science</option>
+    </select>
+    <button id="slBtn" class="satOnly" type="button" aria-pressed="false">Starlink: off</button>
+    <button id="linesBtn" class="starOnly" type="button" aria-pressed="true">Constellation lines: on</button>
+    <select id="skySel" aria-label="Your surroundings (Bortle dark-sky scale)">
+      <option value="all">Your sky: show everything</option>
+      <option value="1">Bortle 1: excellent dark-sky site</option>
+      <option value="2">Bortle 2: truly dark site</option>
+      <option value="3">Bortle 3: rural sky</option>
+      <option value="4">Bortle 4: brighter rural</option>
+      <option value="4.5">Bortle 4.5: semi-suburban</option>
+      <option value="5">Bortle 5: suburban</option>
+      <option value="6">Bortle 6: bright suburban</option>
+      <option value="7">Bortle 7: suburban / town edge</option>
+      <option value="8">Bortle 8: city</option>
+      <option value="9">Bortle 9: inner city</option>
+    </select>
+    <button id="skyBtn" type="button">📱 Sky view</button>
+    <button id="flipBtn" type="button">View: phone to the ground</button>
+    <button id="locBtn" type="button">Set location</button>
+    <button id="reloadBtn" class="satOnly" type="button">Reload</button>
+  </div>
+
+  <section id="altBox" class="satOnly" aria-label="Altitude filter">
+    <div class="altHead"><span>Altitude</span><span id="altLabel">All altitudes</span></div>
+    <div class="dual">
+      <div class="track"><div id="altFill"></div></div>
+      <input type="range" id="altMin" min="0" max="10" step="1" value="0" aria-label="Lowest altitude to show">
+      <input type="range" id="altMax" min="0" max="10" step="1" value="10" aria-label="Highest altitude to show">
+    </div>
+    <div class="ticks" id="altTicks" aria-hidden="true"></div>
+    <p class="hint">For reference: ISS about 420 km, Starlink about 550 km, GPS about 20,200 km, geostationary about 35,800 km.</p>
+  </section>
+
+  <p id="bortleNote" class="hint"></p>
+
+  <form id="locForm" hidden>
+    <label>Latitude <input id="latIn" inputmode="decimal" required></label>
+    <label>Longitude <input id="lonIn" inputmode="decimal" required></label>
+    <button id="gpsBtn" type="button">Use my location</button>
+    <button type="submit">Save location</button>
+    <p id="locMsg" class="hint"></p>
+  </form>
+
+  <section id="info" class="satOnly" hidden aria-live="polite">
+    <h2 id="iName"></h2>
+    <dl>
+      <dt>Elevation</dt><dd id="iEl"></dd>
+      <dt>Direction</dt><dd id="iAz"></dd>
+      <dt>Distance</dt><dd id="iRange"></dd>
+      <dt>Altitude</dt><dd id="iAlt"></dd>
+      <dt>Speed</dt><dd id="iSpeed"></dd>
+      <dt>Directly over</dt><dd id="iGround"></dd>
+      <dt>Nearest place</dt><dd id="iPlace"></dd>
+      <dt>Brightness</dt><dd id="iMag"></dd>
+      <dt>Can I see it?</dt><dd id="iSeen"></dd>
+    </dl>
+    <button id="iMoreBtn" class="moreBtn" type="button" aria-expanded="false">More info</button>
+    <div id="iMore" class="more" hidden aria-live="polite"></div>
+    <h3>Next passes over you</h3>
+    <p id="passNote" class="hint"></p>
+    <ul id="passes"></ul>
+    <div id="map"></div>
+    <p id="mapKey" class="hint">
+      <span class="key" style="border-top:2px dashed #FFB45C"></span>where it’s heading (next orbit),
+      <span class="key" style="border-top:2px solid #8197AD"></span>where it’s been.
+      The gold circle is the area that can see it right now, and the small ring is you.
+    </p>
+  </section>
+
+  <section id="ltgTab" class="ltgOnly">
+    <div class="card">
+      <h2>Lightning near you</h2>
+      <p id="ltgNow" class="big">Checking for lightning…</p>
+      <p id="ltgWhen" class="hint"></p>
+      <div id="ltgMap"></div>
+      <ul id="ltgList" class="evList"></ul>
+      <p class="hint">Gold rings are 10, 25, 50, 100 and 150 km from you. Coloured patches are where the Meteosat weather satellite saw lightning in the last 5 minutes; dots mark each patch’s centre, older ones fade over half an hour. Positions are roughly ±5–10 km, and the data runs a few minutes behind real time. Thunder delays assume sound travels 343 m a second.</p>
+      <p class="hint">Lightning data: EUMETSAT, MTG Lightning Imager.</p>
+    </div>
+    <div class="card">
+      <h2>Flash-to-bang timer</h2>
+      <p class="hint">Tap the button when you see lightning, then again when you hear the thunder. Sound covers about 1 km every 3 seconds (1 mile every 5).</p>
+      <button id="fbBtn" class="bigBtn" type="button">⚡ I saw a flash</button>
+      <p id="fbOut" class="big" aria-live="polite"></p>
+      <ul id="fbHist" class="evList"></ul>
+    </div>
+    <p class="hint warn">If you can hear thunder you’re close enough to be struck. Go indoors and wait 30 minutes after the last thunder. Don’t rely on this app for safety.</p>
+  </section>
+
+  <section id="sunTab" class="sunOnly" aria-live="off">
+    <div class="card">
+      <h2>Sun</h2>
+      <p id="sunNow" class="big"></p>
+      <p id="dayLen" class="hint"></p>
+      <ul id="sunEvents" class="evList"></ul>
+      <p class="hint">Civil twilight: still light enough to be outside without a torch. Nautical twilight: the horizon fades out at sea and the brightest stars appear. Astronomical twilight: the last glow goes, and once it ends the sky is properly dark.</p>
+    </div>
+    <div class="card">
+      <h2>Moon</h2>
+      <div class="moonRow">
+        <svg id="moonIcon" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true"></svg>
+        <div><p id="moonPhase" class="big"></p><p id="moonSub" class="hint"></p></div>
+      </div>
+      <ul id="moonEvents" class="evList"></ul>
+    </div>
+    <div class="card">
+      <h2>Tide</h2>
+      <p id="tideNow" class="big">Loading tides…</p>
+      <ul id="tideEvents" class="evList"></ul>
+      <div id="tideChart"></div>
+      <p id="tideNote" class="hint"></p>
+    </div>
+  </section>
+
+  <section id="starInfo" class="starOnly" hidden>
+    <h2 id="sName"></h2>
+    <dl>
+      <dt>What it is</dt><dd id="sType"></dd>
+      <dt>Constellation</dt><dd id="sCon"></dd>
+      <dt>Brightness</dt><dd id="sMag"></dd>
+      <dt>Elevation</dt><dd id="sEl"></dd>
+      <dt>Direction</dt><dd id="sAz"></dd>
+      <dt>Rises and sets</dt><dd id="sRise"></dd>
+      <dt id="sDistT">Distance</dt><dd id="sDist"></dd>
+      <dt>Can I see it?</dt><dd id="sSeen"></dd>
+    </dl>
+    <button id="sMoreBtn" class="moreBtn" type="button" aria-expanded="false">More info</button>
+    <div id="sMore" class="more" hidden aria-live="polite"></div>
+  </section>
+  <h3 class="starOnly">Brightest above the horizon now</h3>
+  <ul id="starList" class="starOnly"></ul>
+
+  <h3 id="listTitle" class="satOnly">Above the horizon now</h3>
+  <p id="slSummary" class="satOnly" hidden></p>
+  <p id="empty" class="satOnly" hidden>Nothing from this group is above the horizon right now. Try another group, or wait a few minutes.</p>
+  <ul id="list" class="satOnly"></ul>
+</main>
+<section id="skyView" aria-label="Sky view: point your phone at the sky">
+  <video id="svVideo" playsinline muted autoplay></video>
+  <canvas id="svCanvas"></canvas>
+  <div id="svTop">
+    <span id="svStatus"></span>
+    <button id="svClose" type="button" aria-label="Close sky view">✕ Close</button>
+  </div>
+  <div id="svBottom">
+    <div id="svCard"><div><div class="t" id="svName"></div><small id="svSub"></small></div>
+      <button id="svMore" type="button">Details</button></div>
+    <div id="svBtns">
+      <button id="svCam" type="button">📷 Camera: off</button>
+      <button id="svMode" type="button">🧭 Motion</button>
+    </div>
+  </div>
+  <div id="svStart">
+    <p class="big">Hold your phone up and point it at the sky.</p>
+    <p class="hint">It will show the stars, planets, constellations and satellites in that direction, and name whatever is in the middle. Your phone will ask to use its motion sensors.</p>
+    <button id="svGo" class="bigBtn" type="button">Start</button>
+    <button id="svDrag" type="button">No sensors? Drag to look around instead</button>
+  </div>
+</section>
+<div id="redOverlay" aria-hidden="true"></div>
+
+<?!= include('StarData'); ?>
+
+<script>
+const D2R = Math.PI / 180, R2D = 180 / Math.PI, EARTH_R = 6371;
+const DEFAULT_LOC = { lat: 53.284, lon: -3.582, name: 'Abergele' };
+const $ = id => document.getElementById(id);
+const canvas = $('dial'), ctx = canvas.getContext('2d');
+
+let loc = loadLoc();
+let sats = [];          // everything currently shown (group + Starlink if on)
+let baseSats = [];      // the chosen group
+let slSats = [];        // Starlink, loaded on demand
+let extraSats = [];     // satellites added from search that aren't in the current group
+let showSL = false;
+showSL = true;   // on by default
+try { if (localStorage.getItem('skySL') === '0') showSL = false; } catch (e) {}
+let selected = null;
+const RECHECK = 4000;           // ms between checks for satellites well below the horizon
+const SKIP_EL = -5 * D2R;
+const LIST_MAX = 100;           // longest list we rebuild every second
+
+/* ---------- altitude filter ---------- */
+const ALT_STOPS = [0, 200, 500, 1000, 5000, 10000, 20000, 30000, 40000, 60000, Infinity];
+const ALT_TICKS = ['0', '200', '500', '1k', '5k', '10k', '20k', '30k', '40k', '60k', '60k+'];
+let altMinI = 0, altMaxI = 10;
+try {
+  const a = JSON.parse(localStorage.getItem('skyAlt'));
+  if (a && a[0] >= 0 && a[1] <= 10 && a[0] < a[1]) { altMinI = a[0]; altMaxI = a[1]; }
+} catch (e) {}
+function inAltRange(alt) { return alt >= ALT_STOPS[altMinI] && alt <= ALT_STOPS[altMaxI]; }
+function km(i) { return ALT_STOPS[i].toLocaleString() + ' km'; }
+function updateAlt(which) {
+  let a = Number($('altMin').value), b = Number($('altMax').value);
+  if (a >= b) { if (which === 'min') a = b - 1; else b = a + 1; }   // thumbs can't cross
+  altMinI = a; altMaxI = b;
+  $('altMin').value = a; $('altMax').value = b;
+  $('altFill').style.left = a * 10 + '%';
+  $('altFill').style.width = (b - a) * 10 + '%';
+  $('altLabel').textContent =
+      a === 0 && b === 10 ? 'All altitudes'
+    : b === 10 ? km(a) + ' and above'
+    : a === 0 ? 'Up to ' + km(b)
+    : km(a) + ' to ' + km(b);
+  $('altTicks').querySelectorAll('span').forEach((el, i) => el.classList.toggle('on', i >= a && i <= b));
+  try { localStorage.setItem('skyAlt', JSON.stringify([a, b])); } catch (e) {}
+  lastSlow = 0;   // refresh the list straight away
+}
+function initAlt() {
+  ALT_TICKS.forEach((t, i) => {
+    const el = document.createElement('span');
+    el.textContent = t; el.style.left = i * 10 + '%';
+    $('altTicks').append(el);
+  });
+  $('altMin').value = altMinI; $('altMax').value = altMaxI;
+  $('altMin').addEventListener('input', () => updateAlt('min'));
+  $('altMax').addEventListener('input', () => updateAlt('max'));
+  updateAlt();
+}
+// 1 = phone to the ground (map layout, east on the right) — the default
+// -1 = phone to the sky (held overhead, so east appears on the left)
+let flip = 1;
+try { if (localStorage.getItem('skyView') === 'sky') flip = -1; } catch (e) {}
+function viewLabel() { return flip === 1 ? 'View: phone to the ground' : 'View: phone to the sky'; }
+let geom = { cx: 0, cy: 0, R: 0, zf: 1 };   // dial centre, radius and zoom factor, in CSS px
+let view = { w: 0, h: 0 };                    // canvas size in CSS px
+const zoom = { on: false, cx: 0, cy: 0, R: 0, base: 0 };
+let drawn = [];
+let lastSlow = 0;
+
+/* ---------- location ---------- */
+function loadLoc() {
+  try {
+    const s = JSON.parse(localStorage.getItem('skyLoc'));
+    if (s && isFinite(s.lat) && isFinite(s.lon)) return s;
+  } catch (e) {}
+  return null;
+}
+function saveLoc(l) {
+  loc = l;
+  try { localStorage.setItem('skyLoc', JSON.stringify(l)); } catch (e) {}
+  showWhere();
+  if (selected) renderPasses(selected);
+  starNext = 0; rsCache.key = null;
+}
+function showWhere() {
+  const l = loc || DEFAULT_LOC;
+  const label = watchId !== null && l.live ? 'Live GPS ' : l.name ? l.name + ' ' : '';
+  $('where').textContent = label + '(' + l.lat.toFixed(3) + '°, ' + l.lon.toFixed(3) + '°)';
+}
+function observer() {
+  const l = loc || DEFAULT_LOC;
+  return { latitude: l.lat * D2R, longitude: l.lon * D2R, height: 0.05 };
+}
+// Live GPS: keeps following the user as they move. Small jitter (<100 m) is
+// ignored; pass predictions are only redone after moving more than 1 km.
+let watchId = null;
+function distKm(a, b) {
+  const dLat = (b.lat - a.lat) * D2R, dLon = (b.lon - a.lon) * D2R;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * D2R) * Math.cos(b.lat * D2R) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_R * Math.asin(Math.sqrt(h));
+}
+function startLive(onFail) {
+  if (!navigator.geolocation) { onFail && onFail(); return; }
+  stopLive();
+  watchId = navigator.geolocation.watchPosition(
+    p => {
+      const next = { lat: p.coords.latitude, lon: p.coords.longitude, name: 'My location', live: true };
+      const moved = loc && loc.live ? distKm(loc, next) : Infinity;
+      if (moved < 0.1) return;
+      loc = next;
+      try { localStorage.setItem('skyLoc', JSON.stringify(loc)); } catch (e) {}
+      showWhere();
+      $('locForm').hidden = true;
+      if (moved > 1 && selected) renderPasses(selected);
+    },
+    err => {
+      if (err && err.code === 1) {              // permission denied: stop and keep the last fix
+        stopLive();
+        if (loc) loc.live = false;
+        showWhere();
+        onFail && onFail();
+      }                                          // timeouts: the watch keeps trying by itself
+    },
+    { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 });
+  showWhere();
+}
+function stopLive() {
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+}
+
+/* ---------- data ---------- */
+function setStatus(t) { $('status').textContent = t; }
+// "All active" already contains every Starlink, so only fetch them separately for other groups
+function needStarlink() { return showSL && !slSats.length && $('group').value !== 'active'; }
+function rebuild() {
+  const seen = new Set();
+  sats = [];
+  const add = s => { if (!seen.has(s.id)) { seen.add(s.id); sats.push(s); } };
+  baseSats.forEach(s => { if (showSL || !s.starlink) add(s); });   // Starlink off hides them from any group
+  if (showSL) slSats.forEach(add);
+  extraSats.forEach(add);
+  if (selected && sats.indexOf(selected) === -1) select(null);
+}
+function updateSlBtn() {
+  $('slBtn').textContent = showSL ? 'Starlink: on' : 'Starlink: off';
+  $('slBtn').setAttribute('aria-pressed', String(showSL));
+}
+function loadStarlink() {
+  $('slBtn').textContent = 'Starlink: loading…';
+  google.script.run
+    .withSuccessHandler(text => { slSats = parseTle(text); updateSlBtn(); rebuild(); })
+    .withFailureHandler(() => {
+      showSL = false;
+      $('slBtn').setAttribute('aria-pressed', 'false');
+      $('slBtn').textContent = 'Starlink: failed, tap to retry';
+    })
+    .getTles('starlink');
+}
+function load() {
+  setStatus('Loading satellites…');
+  baseSats = []; rebuild();
+  if (needStarlink()) loadStarlink();
+  google.script.run
+    .withSuccessHandler(text => {
+      baseSats = parseTle(text);
+      rebuild();
+      setStatus(baseSats.length ? '' : 'No satellites in that group right now.');
+    })
+    .withFailureHandler(err => {
+      setStatus('Couldn’t load satellite data: ' + (err && err.message ? err.message : err) +
+                '. Tap Reload to try again.');
+    })
+    .getTles($('group').value);
+}
+// CelesTrak CSV (OMM) rows -> satellite records. Columns are read by header
+// name, so the order doesn't matter. Works with 6-digit catalogue numbers.
+const OMM_NUM = new Set(['MEAN_MOTION', 'ECCENTRICITY', 'INCLINATION', 'RA_OF_ASC_NODE',
+  'ARG_OF_PERICENTER', 'MEAN_ANOMALY', 'EPHEMERIS_TYPE', 'NORAD_CAT_ID', 'ELEMENT_SET_NO',
+  'REV_AT_EPOCH', 'BSTAR', 'MEAN_MOTION_DOT', 'MEAN_MOTION_DDOT']);
+function splitCsv(line) {
+  const out = []; let cur = '', q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) {
+      if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+function parseTle(text) {
+  const rows = text.trim().split(/\r?\n/);
+  if (!rows.length) return [];
+  const head = splitCsv(rows[0]).map(h => h.trim());
+  const out = [];
+  for (let r = 1; r < rows.length; r++) {
+    if (!rows[r]) continue;
+    const cells = splitCsv(rows[r]);
+    const omm = {};
+    head.forEach((h, j) => { omm[h] = OMM_NUM.has(h) ? Number(cells[j]) : (cells[j] || '').trim(); });
+    let rec;
+    try { rec = satellite.json2satrec(omm); } catch (e) { continue; }
+    if (!rec || rec.error) continue;
+    const name = omm.OBJECT_NAME || ('Object ' + omm.NORAD_CAT_ID);
+    out.push({ name, rec, id: String(omm.NORAD_CAT_ID), intl: omm.OBJECT_ID || '', starlink: /^STARLINK/i.test(name), checked: 0 });
+  }
+  return out;
+}
+
+/* ---------- astronomy ---------- */
+function sunEci(date) {
+  const n = date.getTime() / 86400000 + 2440587.5 - 2451545.0;
+  const L = (280.460 + 0.9856474 * n) % 360;
+  const g = ((357.528 + 0.9856003 * n) % 360) * D2R;
+  const lam = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * D2R;
+  const eps = (23.439 - 0.0000004 * n) * D2R;
+  const r = (1.00014 - 0.01671 * Math.cos(g) - 0.00014 * Math.cos(2 * g)) * 149597870.7;
+  return { x: r * Math.cos(lam), y: r * Math.cos(eps) * Math.sin(lam), z: r * Math.sin(eps) * Math.sin(lam) };
+}
+function isSunlit(p, sun) {
+  const sl = Math.hypot(sun.x, sun.y, sun.z);
+  const d = (p.x * sun.x + p.y * sun.y + p.z * sun.z) / sl;
+  if (d > 0) return true;
+  const r2 = p.x * p.x + p.y * p.y + p.z * p.z;
+  return Math.sqrt(Math.max(0, r2 - d * d)) > EARTH_R;
+}
+// Satellite brightness. Each satellite gets a "standard magnitude" (how bright
+// it looks 1,000 km away, half lit, like a half Moon). That's then adjusted for
+// its real distance and the angle of the sunlight hitting it. The standard
+// magnitudes are typical values by satellite type, so results are estimates,
+// usually right to within a magnitude or so.
+function stdMag(name) {
+  const n = name.toUpperCase();
+  if (/^ISS\b|ZARYA/.test(n)) return -1.8;
+  if (/TIANHE|TIANGONG|^CSS\b/.test(n)) return -0.5;
+  if (/BLUEWALKER|BLUEBIRD/.test(n)) return 1.5;
+  if (/HST|HUBBLE/.test(n)) return 2.2;
+  if (/R\/B|ROCKET/.test(n)) return 3.5;
+  if (/^STARLINK/.test(n)) return 5.0;
+  if (/^KUIPER/.test(n)) return 5.5;
+  if (/^IRIDIUM/.test(n)) return 5.5;
+  if (/^ONEWEB/.test(n)) return 7.5;
+  if (/FLOCK|LEMUR|CUBESAT|\bDEB\b/.test(n)) return 8.5;
+  return 5.0;                                        // a typical medium-sized satellite
+}
+function satMagAt(name, eci, gmst, sun, obs) {
+  if (!isSunlit(eci, sun)) return null;              // in Earth's shadow: not lit at all
+  const o = satellite.ecfToEci(satellite.geodeticToEcf(obs), gmst);
+  const ax = sun.x - eci.x, ay = sun.y - eci.y, az = sun.z - eci.z;
+  const bx = o.x - eci.x, by = o.y - eci.y, bz = o.z - eci.z;
+  const la = Math.hypot(ax, ay, az), lb = Math.hypot(bx, by, bz);
+  const ph = Math.acos(Math.max(-1, Math.min(1, (ax * bx + ay * by + az * bz) / (la * lb))));
+  const f = Math.sin(ph) + (Math.PI - ph) * Math.cos(ph);   // how much of its lit side faces you
+  if (f < 1e-4) return null;
+  return stdMag(name) + 5 * Math.log10(lb / 1000) - 2.5 * Math.log10(f);
+}
+function magText(m) { return 'mag ' + (Math.round(m * 10) / 10).toFixed(1); }
+
+function look(sat, date, obs) {
+  const pv = satellite.propagate(sat.rec, date);
+  if (!pv || !pv.position || typeof pv.position !== 'object') return null;
+  const gmst = satellite.gstime(date);
+  const la = satellite.ecfToLookAngles(obs, satellite.eciToEcf(pv.position, gmst));
+  return { az: la.azimuth, el: la.elevation, range: la.rangeSat, eci: pv.position, vel: pv.velocity, gmst };
+}
+function compass(deg) {
+  return ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+}
+
+/* ---------- drawing ---------- */
+function project(az, el) {
+  const r = geom.R * (90 - el * R2D) / 90;
+  return { x: geom.cx + flip * r * Math.sin(az), y: geom.cy - r * Math.cos(az) };
+}
+function baseRadius(w, h) { return Math.min(w, h) / 2 - 30; }
+function fitCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  const dpr = window.devicePixelRatio || 1;
+  const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
+  if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  view = { w, h };
+  if (zoom.on) { clampZoom(); geom = { cx: zoom.cx, cy: zoom.cy, R: zoom.R, zf: zoom.R / zoom.base }; }
+  else geom = { cx: w / 2, cy: h / 2, R: baseRadius(w, h), zf: 1 };
+  return w;
+}
+function offScreen(q, pad) { return q.x < -pad || q.y < -pad || q.x > view.w + pad || q.y > view.h + pad; }
+/* ---------- realistic sky colour ---------- */
+// The dial's background is painted point by point. Each point's colour comes
+// from a smooth ramp running daylight -> civil -> nautical -> astronomical
+// twilight -> night, using an "effective" Sun height that is a little higher
+// on the side of the sky facing the Sun (so that side stays light longer) and
+// lower on the opposite side. Near sunset/sunrise the horizon by the Sun gets a
+// warm glow. The picture is 128 x 128 and smoothly scaled, and it's only
+// redrawn when the Sun has moved, so it costs almost nothing per frame.
+const SKY_RAMP = [            // [Sun height in degrees, red, green, blue]
+  [-90, 4, 6, 12], [-18, 5, 8, 16], [-15, 8, 14, 28], [-12, 13, 24, 46], [-9, 19, 36, 68],
+  [-6, 28, 52, 96], [-3, 42, 76, 128], [0, 58, 100, 154], [6, 68, 120, 180], [20, 76, 136, 196], [90, 70, 128, 192]
+];
+function skyRamp(h) {
+  if (h <= SKY_RAMP[0][0]) return SKY_RAMP[0].slice(1);
+  for (let i = 1; i < SKY_RAMP.length; i++) {
+    const a = SKY_RAMP[i - 1], b = SKY_RAMP[i];
+    if (h <= b[0]) {
+      const f = (h - a[0]) / (b[0] - a[0]);
+      return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+    }
+  }
+  return SKY_RAMP[SKY_RAMP.length - 1].slice(1);
+}
+let skyTex = null, skyTexCtx = null, skyTexImg = null, skyTexKey = '';
+function skyTexture(sunElDeg, sunAz) {
+  const N = 128;
+  const key = (Math.round(sunElDeg * 4) / 4) + '|' + Math.round(sunAz * R2D) + '|' + flip;
+  if (skyTex && key === skyTexKey) return skyTex;
+  if (!skyTex) {
+    skyTex = document.createElement('canvas'); skyTex.width = skyTex.height = N;
+    skyTexCtx = skyTex.getContext('2d'); skyTexImg = skyTexCtx.createImageData(N, N);
+  }
+  skyTexKey = key;
+  const d = skyTexImg.data;
+  const hs = sunElDeg * D2R, sinS = Math.sin(hs), cosS = Math.cos(hs);
+  const glowW = Math.exp(-Math.pow((sunElDeg + 5) / 9, 2));     // twilight glow, strongest a few degrees below the horizon
+  const warmW = Math.exp(-Math.pow(sunElDeg / 5, 2));           // sunset colours, strongest at the horizon
+  const dayW = Math.min(1, Math.max(0, (sunElDeg + 2) / 12));    // pale horizon in daytime
+  for (let v = 0; v < N; v++) {
+    for (let u = 0; u < N; u++) {
+      const i = (v * N + u) * 4;
+      const x = (u + 0.5) / N * 2 - 1, y = (v + 0.5) / N * 2 - 1;
+      const r = Math.min(1, Math.hypot(x, y));
+      const el = (1 - r) * Math.PI / 2;
+      const az = Math.atan2(x * flip, -y);
+      const cg = Math.sin(el) * sinS + Math.cos(el) * cosS * Math.cos(az - sunAz);
+      const g = Math.acos(Math.max(-1, Math.min(1, cg))) * R2D;  // angle from the Sun
+      const low = Math.pow(1 - el / (Math.PI / 2), 2);           // 1 at the horizon, 0 overhead
+      const hEff = sunElDeg + glowW * (10 * Math.exp(-Math.pow(g / 55, 2)) - 3 + 2 * low);
+      let [R_, G_, B_] = skyRamp(hEff);
+      const pale = dayW * 0.5 * low * low;
+      R_ += (150 - R_) * pale; G_ += (182 - G_) * pale; B_ += (212 - B_) * pale;
+      const warm = 0.6 * warmW * Math.exp(-Math.pow(g / 32, 2)) * low;
+      R_ += (226 - R_) * warm; G_ += (138 - G_) * warm; B_ += (82 - B_) * warm;
+      d[i] = R_; d[i + 1] = G_; d[i + 2] = B_; d[i + 3] = 255;
+    }
+  }
+  skyTexCtx.putImageData(skyTexImg, 0, 0);
+  return skyTex;
+}
+
+function drawDial(w, sunEl, sunAz) {
+  const { cx, cy, R, zf } = geom;
+  ctx.clearRect(0, 0, view.w, view.h);
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(skyTexture(sunEl, sunAz || 0), cx - R, cy - R, 2 * R, 2 * R);
+  ctx.restore();
+
+  // More elevation rings and bearing lines as you zoom in
+  const rings = zf >= 2 ? [10, 20, 30, 40, 50, 60, 70, 80] : [30, 60];
+  ctx.strokeStyle = 'rgba(130,170,210,0.22)'; ctx.lineWidth = 1;
+  for (const el of rings) {
+    ctx.beginPath(); ctx.arc(cx, cy, R * (90 - el) / 90, 0, 2 * Math.PI); ctx.stroke();
+  }
+  const spoke = zf >= 3 ? 15 : 45;
+  for (let a = 0; a < 360; a += spoke) {
+    const p = project(a * D2R, 0);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(p.x, p.y); ctx.stroke();
+  }
+
+  ctx.strokeStyle = '#C8A55E';
+  for (let a = 0; a < 360; a += 5) {
+    const len = a % 30 === 0 ? 9 : a % 10 === 0 ? 6 : 3;
+    const sn = Math.sin(a * D2R) * flip, k = -Math.cos(a * D2R);
+    ctx.lineWidth = a % 30 === 0 ? 1.5 : 1;
+    ctx.beginPath();
+    ctx.moveTo(cx + sn * R, cy + k * R);
+    ctx.lineTo(cx + sn * (R + len), cy + k * (R + len));
+    ctx.stroke();
+  }
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.stroke();
+
+  ctx.fillStyle = '#C8A55E';
+  ctx.font = '500 16px Jost, system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([t, a]) => {
+    ctx.fillText(t, cx + flip * Math.sin(a * D2R) * (R + 20), cy - Math.cos(a * D2R) * (R + 20));
+  });
+
+  // Ring labels run towards the middle of the screen, so they stay in view when zoomed
+  let ux = 0, uy = -1;
+  if (zoom.on) {
+    const dx = view.w / 2 - cx, dy = view.h / 2 - cy, d = Math.hypot(dx, dy);
+    if (d > 20) { ux = dx / d; uy = dy / d; }
+  }
+  ctx.fillStyle = 'rgba(180,200,220,0.55)';
+  ctx.font = '12px Jost, system-ui, sans-serif';
+  for (const el of rings) {
+    const rr = R * (90 - el) / 90;
+    ctx.fillText(el + '°', cx + ux * rr + 14, cy + uy * rr + 9);
+  }
+
+  ctx.fillStyle = 'rgba(200,165,94,0.7)';
+  ctx.beginPath(); ctx.arc(cx, cy, 2, 0, 2 * Math.PI); ctx.fill();
+}
+function strokeTrack(sat, now, obs, from, to, step, style, dash) {
+  ctx.save();
+  ctx.strokeStyle = style; ctx.lineWidth = 1.5; ctx.setLineDash(dash);
+  ctx.beginPath();
+  let pen = false;
+  for (let t = from; t <= to; t += step) {
+    const p = look(sat, new Date(now.getTime() + t * 1000), obs);
+    if (!p || p.el < 0) { pen = false; continue; }
+    const q = project(p.az, p.el);
+    pen ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y);
+    pen = true;
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+function satFrame() {
+  const now = new Date();
+  const w = fitCanvas();
+  const obs = observer();
+  const sun = sunEci(now);
+  const gmst = satellite.gstime(now);
+  const sunLook = satellite.ecfToLookAngles(obs, satellite.eciToEcf(sun, gmst));
+  const sunEl = sunLook.elevation * R2D, sunAz = sunLook.azimuth;
+  const dark = sunEl < -6;
+
+  drawDial(w, sunEl, sunAz);
+
+  const up = [];
+  const bLimS = bortleLimit();
+  const t = now.getTime();
+  for (const s of sats) {
+    // Satellites well below the horizon can't appear for a few seconds, so only
+    // re-check them every RECHECK ms. This keeps ~9,000 Starlinks smooth on a phone.
+    if (s !== selected && s.now && s.now.el < SKIP_EL && t - s.checked < RECHECK) continue;
+    const p = look(s, now, obs);
+    s.checked = s.checked ? t : t - Math.random() * RECHECK; // stagger the first pass
+    s.now = p;
+    if (!p) continue;
+    p.lit = isSunlit(p.eci, sun);
+    p.visible = p.lit && dark;
+    p.mag = p.el >= 0 && p.lit ? satMagAt(s.name, p.eci, p.gmst, sun, obs) : null;
+    p.alt = Math.hypot(p.eci.x, p.eci.y, p.eci.z) - EARTH_R;
+    // With a sky chosen, only keep satellites you could actually see: lit by the
+    // Sun and bright enough for your surroundings
+    const tooFaint = bLimS < Infinity && s !== selected && (p.mag == null || p.mag > bLimS);
+    if (p.el >= 0 && !tooFaint && (s === selected || inAltRange(p.alt))) up.push(s);
+  }
+
+  // Trails for everything except Starlink (too many) and geostationary (they don't move)
+  const trailCount = up.reduce((n, s) => n + (!s.starlink && s.rec.no > 0.01 ? 1 : 0), 0);
+  if (trailCount <= 150) for (const s of up) if (!s.starlink && s.rec.no > 0.01) strokeTrack(s, now, obs, -60, 0, 10, 'rgba(220,230,240,0.18)', []);
+  up.sort((a, b) => (b.starlink ? 1 : 0) - (a.starlink ? 1 : 0)); // Starlink underneath
+  if (selected) strokeTrack(selected, now, obs, 0, 600, 15, 'rgba(255,180,92,0.75)', [4, 5]);
+
+  drawn = [];
+  for (const s of up) {
+    const q = project(s.now.az, s.now.el);
+    const isSel = s === selected, isStation = /\bISS\b|TIANHE|CSS/i.test(s.name);
+    ctx.save();
+    const vis = s.now.visible, lit = s.now.lit;
+    if (vis) { ctx.shadowColor = s.starlink ? '#7CC4FF' : '#F4F7FA'; ctx.shadowBlur = s.starlink ? 6 : 10; }
+    ctx.fillStyle = isSel || isStation ? '#FFB45C'
+                  : s.starlink ? (vis ? '#7CC4FF' : lit ? '#3F86D1' : '#2A5585')
+                  : vis ? '#F4F7FA' : lit ? '#A9BCCF' : '#5A7592';
+    const rad = isSel || isStation ? 3.6 : s.starlink ? (vis ? 3 : 2) : (vis ? 3.6 : 2.4);
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, rad, 0, 2 * Math.PI);
+    ctx.fill(); ctx.restore();
+    if (isSel) {
+      ctx.strokeStyle = '#FFB45C'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(q.x, q.y, 9, 0, 2 * Math.PI); ctx.stroke();
+    }
+    if (isSel || isStation) {
+      ctx.fillStyle = '#FFD9A8'; ctx.font = '13px Jost, system-ui, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(s.name, q.x + 12, q.y);
+    }
+    drawn.push({ s, x: q.x, y: q.y });
+  }
+
+  if (now - lastSlow > 1000) {
+    lastSlow = now.getTime();
+    $('clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    renderList(up);
+    if (selected) {
+      updateInfo(selected, dark);
+      if (Date.now() - passCalc.t > 60000) renderPasses(selected);
+    }
+    setZoomCap(selected && selected.now ? selected.name : '',
+      selected && selected.now ? (selected.now.el >= 0 ? Math.round(selected.now.el * R2D) + '° up, ' +
+        compass(selected.now.az * R2D) + (selected.now.mag != null ? ', ' + magText(selected.now.mag) : '')
+        : 'Below the horizon') + '. Tap for details' : '');
+  }
+}
+
+/* ---------- panels ---------- */
+function renderList(up) {
+  const ul = $('list');
+  ul.textContent = '';
+  const sl = up.filter(s => s.starlink);
+  const box = $('slSummary');
+  if (showSL && slSats.length) {
+    const v = sl.filter(s => s.now.visible).length;
+    box.textContent = 'Starlink above the horizon: ' + sl.length +
+      (v ? ', ' + v + ' sunlit against a dark sky' : '') + '. Tap a blue dot for details.';
+    box.hidden = false;
+  } else box.hidden = true;
+
+  const main = up.filter(s => !s.starlink);
+  if (!baseSats.length) { $('empty').hidden = true; $('listTitle').textContent = 'Above the horizon now'; return; }
+  main.sort((a, b) => b.now.el - a.now.el);
+  $('listTitle').textContent = 'Above the horizon now (' + main.length + ')' +
+    (main.length > LIST_MAX ? ', highest ' + LIST_MAX + ' shown' : '');
+  $('empty').hidden = main.length > 0;
+  for (const s of main.slice(0, LIST_MAX)) {
+    const li = document.createElement('li');
+    li.dataset.idx = sats.indexOf(s);
+    if (s.now.visible) li.classList.add('vis');
+    if (s === selected) li.classList.add('sel');
+    const n = document.createElement('span');
+    const dot = document.createElement('span'); dot.className = 'dot';
+    n.append(dot, s.name);
+    const pos = document.createElement('span'); pos.className = 'pos';
+    pos.textContent = Math.round(s.now.el * R2D) + '° ' + compass(s.now.az * R2D) +
+      (s.now.visible && s.now.mag != null ? ', ' + magText(s.now.mag) : '');
+    li.append(n, pos);
+    ul.append(li);
+  }
+}
+function updateInfo(s, dark) {
+  const p = s.now;
+  $('info').hidden = false;
+  $('iName').textContent = s.name;
+  if (!p) { $('iEl').textContent = 'Position unavailable'; return; }
+  const geo = satellite.eciToGeodetic(p.eci, p.gmst);
+  $('iEl').textContent = p.el >= 0 ? (p.el * R2D).toFixed(1) + '° above the horizon' : 'Below the horizon';
+  $('iAz').textContent = Math.round(p.az * R2D) + '° (' + compass(p.az * R2D) + ')';
+  $('iRange').textContent = Math.round(p.range).toLocaleString() + ' km';
+  $('iAlt').textContent = Math.round(geo.height).toLocaleString() + ' km';
+  if (p.vel) {
+    const kms = Math.hypot(p.vel.x, p.vel.y, p.vel.z);   // orbital speed, km/s
+    $('iSpeed').textContent = Math.round(kms * 3600).toLocaleString() + ' km/h (' +
+      Math.round(kms * 2236.94).toLocaleString() + ' mph), ' + kms.toFixed(2) + ' km/s';
+  } else $('iSpeed').textContent = '';
+  const glat = geo.latitude * R2D;
+  const glon = ((geo.longitude * R2D + 540) % 360) - 180;
+  $('iGround').textContent = Math.abs(glat).toFixed(2) + '° ' + (glat >= 0 ? 'N' : 'S') + ', ' +
+                             Math.abs(glon).toFixed(2) + '° ' + (glon >= 0 ? 'E' : 'W');
+  updateMap(s, glat, glon, geo.height);
+  lookupPlace(s, glat, glon);
+  const nowD = new Date(), sun = sunEci(nowD), obs = observer();
+  const sunEl = satellite.ecfToLookAngles(obs, satellite.eciToEcf(sun, p.gmst)).elevation * R2D;
+  const m = p.el >= 0 ? satMagAt(s.name, p.eci, p.gmst, sun, obs) : null;
+  $('iMag').textContent = p.el < 0 ? 'Below the horizon'
+    : m == null ? 'Not lit by the Sun right now, so it can’t be seen'
+    : 'About magnitude ' + m.toFixed(1) + ', ' + brightnessWords(m) + ' (an estimate; lower numbers are brighter)';
+  $('iSeen').textContent = p.el < 0 ? 'No, it’s below the horizon'
+    : !p.lit ? 'No, it’s in Earth’s shadow'
+    : !dark ? 'Unlikely, the sky is too bright'
+    : m != null && m > bortleLimit() ? 'Not from your surroundings; it’s too faint for your sky'
+    : m != null && m <= limitMag(sunEl) ? 'Yes, it’s sunlit against a dark sky'
+    : m != null && m <= 6.5 ? 'Only somewhere really dark; it’s faint'
+    : 'Not by eye; it’s too faint';
+}
+/* ---------- ground map ---------- */
+let map = null, mapLayers = null, mapFollow = true, trackFor = { id: null, t: 0 };
+function ensureMap() {
+  if (map) return true;
+  if (typeof L === 'undefined') { $('map').textContent = 'The map couldn’t load. Check your connection.'; return false; }
+  map = L.map('map', {
+    worldCopyJump: true, minZoom: 1, maxZoom: 9, scrollWheelZoom: false,
+    dragging: !L.Browser.mobile          // on phones, one-finger drags scroll the page instead
+  }).setView([20, 0], 2);
+  // Standard OpenStreetMap tiles: free and keyless (CARTO now watermarks keyless tiles).
+  // They're light by default, so CSS on .leaflet-tile-pane darkens them to match the app.
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 9,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  mapLayers = {
+    track: L.layerGroup().addTo(map),
+    foot: L.circle([0, 0], { radius: 1, color: '#C8A55E', weight: 1, fillColor: '#C8A55E', fillOpacity: 0.08 }).addTo(map),
+    me: L.circleMarker([0, 0], { radius: 4, color: '#C8A55E', weight: 2, fillColor: '#0C1726', fillOpacity: 1 }).addTo(map),
+    sat: L.circleMarker([0, 0], { radius: 6, color: '#FFB45C', weight: 2, fillColor: '#FFB45C', fillOpacity: 1 }).addTo(map)
+  };
+  map.on('dragstart', () => { mapFollow = false; });
+  return true;
+}
+function subPoint(rec, date) {
+  const pv = satellite.propagate(rec, date);
+  if (!pv || !pv.position) return null;
+  const g = satellite.eciToGeodetic(pv.position, satellite.gstime(date));
+  return [g.latitude * R2D, ((g.longitude * R2D + 540) % 360) - 180];
+}
+function splitAtDateLine(pts) {
+  const segs = [[]];
+  pts.forEach((p, i) => {
+    if (i && Math.abs(p[1] - pts[i - 1][1]) > 180) segs.push([]);
+    segs[segs.length - 1].push(p);
+  });
+  return segs.filter(seg => seg.length > 1);
+}
+function drawTrack(s, now) {
+  const period = Math.min(2 * Math.PI / s.rec.no, 1440);   // minutes per orbit, capped at a day
+  const step = period / 150;
+  const nowPt = subPoint(s.rec, new Date(now));
+  const past = [], future = [];
+  for (let m = -period / 3; m < 0; m += step) {
+    const p = subPoint(s.rec, new Date(now + m * 60000)); if (p) past.push(p);
+  }
+  for (let m = step; m <= period; m += step) {
+    const p = subPoint(s.rec, new Date(now + m * 60000)); if (p) future.push(p);
+  }
+  if (nowPt) { past.push(nowPt); future.unshift(nowPt); }
+  mapLayers.track.clearLayers();
+  splitAtDateLine(past).forEach(seg =>
+    L.polyline(seg, { color: '#8197AD', weight: 2, opacity: 0.7 }).addTo(mapLayers.track));
+  splitAtDateLine(future).forEach(seg =>
+    L.polyline(seg, { color: '#FFB45C', weight: 2, dashArray: '5 6' }).addTo(mapLayers.track));
+}
+function updateMap(s, glat, glon, h) {
+  if (!ensureMap()) return;
+  const now = Date.now();
+  const isNew = trackFor.id !== s.id;
+  if (isNew || now - trackFor.t > 60000) { drawTrack(s, now); trackFor = { id: s.id, t: now }; }
+  mapLayers.sat.setLatLng([glat, glon]);
+  // Footprint: everywhere on Earth from which the satellite is above the horizon
+  const lam = Math.acos(EARTH_R / (EARTH_R + Math.max(h, 1)));
+  mapLayers.foot.setLatLng([glat, glon]).setRadius(EARTH_R * lam * 1000);
+  const l = loc || DEFAULT_LOC;
+  mapLayers.me.setLatLng([l.lat, l.lon]);
+  if (isNew) map.setView([glat, glon], 2, { animate: false });
+  else if (mapFollow) map.panTo([glat, glon], { animate: true, duration: 0.8 });
+}
+
+// Asks the server for the nearest town under the satellite: straight away for a
+// newly selected satellite, then at most every 30 s once it has moved ~25 km.
+let place = { id: null, lat: 0, lon: 0, t: 0, busy: false };
+function lookupPlace(s, lat, lon) {
+  const now = Date.now();
+  if (place.busy) return;
+  const moved = Math.abs(lat - place.lat) > 0.25 || Math.abs(lon - place.lon) > 0.25;
+  if (place.id === s.id && (now - place.t < 30000 || !moved)) return;
+  place = { id: s.id, lat, lon, t: now, busy: true };
+  const mine = place;
+  google.script.run
+    .withSuccessHandler(name => {
+      mine.busy = false;
+      if (selected && selected.id === s.id)
+        $('iPlace').textContent = name || 'Over the sea or a remote area';
+    })
+    .withFailureHandler(() => {
+      mine.busy = false;
+      if (selected && selected.id === s.id)
+        $('iPlace').textContent = 'Couldn’t look up a place right now';
+    })
+    .nearestPlace(lat, lon);
+}
+
+/* ---------- pass prediction ---------- */
+let passCalc = { id: null, t: 0 };
+function lookAtMs(rec, ms, obs) {
+  const d = new Date(ms);
+  const pv = satellite.propagate(rec, d);
+  if (!pv || !pv.position) return null;
+  const la = satellite.ecfToLookAngles(obs, satellite.eciToEcf(pv.position, satellite.gstime(d)));
+  return { el: la.elevation, az: la.azimuth, eci: pv.position };
+}
+// Narrow a horizon crossing between a and b (ms) down to about a second
+function crossing(rec, obs, a, b, rising) {
+  for (let i = 0; i < 14; i++) {
+    const m = (a + b) / 2, p = lookAtMs(rec, m, obs);
+    if ((p && p.el > 0) === rising) b = m; else a = m;
+  }
+  return b;
+}
+function describePass(rec, obs, rise, set, name) {
+  let best = null, visible = false, peakMag = null;
+  for (let i = 0; i <= 40; i++) {
+    const t = rise + (set - rise) * i / 40, p = lookAtMs(rec, t, obs);
+    if (!p) continue;
+    if (!best || p.el > best.el) best = Object.assign({ t }, p);
+    if (!visible && p.el >= 10 * D2R) {
+      const d = new Date(t), sun = sunEci(d);
+      const sunEl = satellite.ecfToLookAngles(obs, satellite.eciToEcf(sun, satellite.gstime(d))).elevation;
+      if (sunEl < -6 * D2R && isSunlit(p.eci, sun)) {                 // sunlit satellite, dark sky
+        visible = true;
+        const m = satMagAt(name || '', p.eci, satellite.gstime(d), sun, obs);
+        if (m != null && (peakMag == null || m < peakMag)) peakMag = m;
+      }
+    }
+  }
+  if (!best) return null;
+  const r = lookAtMs(rec, rise + 1000, obs), st = lookAtMs(rec, set - 1000, obs);
+  return { rise, set, maxEl: best.el, maxAz: best.az, maxT: best.t,
+           riseAz: r ? r.az : best.az, setAz: st ? st.az : best.az, visible, peakMag };
+}
+function findPasses(s, count) {
+  const obs = observer(), now = Date.now();
+  const periodS = 2 * Math.PI / s.rec.no * 60;
+  const step = Math.min(Math.max(periodS / 150, 15), 600) * 1000;   // ~37 s for the ISS
+  const days = periodS < 13500 ? 3 : 7;
+  const start = lookAtMs(s.rec, now, obs);
+  if (!start) return null;
+  let up = start.el > 0, riseT = now, current = null;
+  const passes = [];
+  for (let t = now + step; t <= now + days * 86400000 && passes.length < count; t += step) {
+    const p = lookAtMs(s.rec, t, obs);
+    if (!p) break;
+    const u = p.el > 0;
+    if (u && !up) riseT = crossing(s.rec, obs, t - step, t, true);
+    if (!u && up) {
+      const d = describePass(s.rec, obs, riseT, crossing(s.rec, obs, t - step, t, false), s.name);
+      if (d) { if (start.el > 0 && !current && riseT === now) current = d; else passes.push(d); }
+    }
+    up = u;
+  }
+  return { upNow: start.el > 0, current, passes, days };
+}
+function clock(ms) { return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
+function dayTime(ms) {
+  const d = new Date(ms), n = new Date();
+  const diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) -
+                           new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 86400000);
+  const day = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow'
+            : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return day + ' ' + clock(ms);
+}
+function untilText(ms) {
+  const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
+  if (m < 60) return 'in ' + m + ' min';
+  const h = Math.floor(m / 60);
+  return h < 24 ? 'in ' + h + ' h ' + (m % 60) + ' min' : 'in ' + Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+}
+function dirOf(az) { return compass(az * R2D); }
+function renderPasses(s) {
+  passCalc = { id: s.id, t: Date.now() };
+  const note = $('passNote'), ul = $('passes');
+  ul.textContent = '';
+  const r = findPasses(s, 5);
+  if (!r) { note.textContent = 'Passes can’t be predicted for this satellite. Its orbit data may be out of date.'; return; }
+  if (r.upNow && !r.current) {
+    note.textContent = 'Above your horizon now, and stays up for at least the next ' + r.days + ' days.';
+  } else if (r.current) {
+    const c = r.current;
+    note.textContent = 'Above your horizon now. ' +
+      (c.maxT > Date.now() ? 'Peaks at ' + Math.round(c.maxEl * R2D) + '° in the ' + dirOf(c.maxAz) + ' at ' + clock(c.maxT) + ', then s'
+                           : 'S') +
+      'ets in the ' + dirOf(c.setAz) + ' at ' + clock(c.set) + '.';
+  } else if (!r.passes.length) {
+    note.textContent = 'Doesn’t rise above your horizon in the next ' + r.days + ' days.';
+  } else note.textContent = 'Next rises ' + untilText(r.passes[0].rise) + '.';
+
+  for (const p of r.passes) {
+    const li = document.createElement('li');
+    const top = document.createElement('div'); top.className = 'pt';
+    const when = document.createElement('span'); when.textContent = dayTime(p.rise);
+    top.append(when);
+    if (p.visible && (bortle === 'all' || (p.peakMag != null && p.peakMag <= bortleLimit()))) {
+      const b = document.createElement('span'); b.className = 'badge';
+      b.textContent = p.peakMag != null ? 'Visible, ' + magText(p.peakMag) : 'Visible';
+      top.append(b);
+    }
+    const det = document.createElement('div'); det.className = 'pd';
+    det.textContent = 'Rises ' + dirOf(p.riseAz) + ', peaks ' + Math.round(p.maxEl * R2D) + '° ' +
+      dirOf(p.maxAz) + ' at ' + clock(p.maxT) + ', sets ' + dirOf(p.setAz) + ' at ' + clock(p.set) +
+      ' (' + Math.max(1, Math.round((p.set - p.rise) / 60000)) + ' min)';
+    li.append(top, det);
+    ul.append(li);
+  }
+}
+
+/* ---------- search ---------- */
+function showResults(list, msg) {
+  const ul = $('results');
+  ul.textContent = '';
+  if (msg) { const li = document.createElement('li'); li.className = 'msg'; li.textContent = msg; ul.append(li); }
+  for (const s of list) {
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.type = 'button';
+    const n = document.createElement('span'); n.textContent = s.name;
+    const id = document.createElement('span'); id.className = 'rid'; id.textContent = '#' + s.id;
+    b.append(n, id);
+    b.addEventListener('click', () => pickResult(s));
+    li.append(b); ul.append(li);
+  }
+}
+function localMatches(q) {
+  q = q.trim().toLowerCase();
+  if (q.length < 2) return [];
+  return sats.filter(s => s.id === q || s.name.toLowerCase().includes(q)).slice(0, 8);
+}
+function pickResult(r) {
+  let s = sats.find(x => x.id === r.id);
+  if (!s) {
+    s = r;
+    extraSats = extraSats.filter(x => x.id !== s.id).concat(s).slice(-5);  // keep the last 5 searched
+    rebuild();
+  }
+  $('results').textContent = '';
+  $('searchIn').value = s.name;
+  $('searchIn').blur();
+  select(s);
+  $('info').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function select(s) {
+  if (s !== selected) closeMore('i');
+  selected = s;
+  if (!s) { $('info').hidden = true; return; }
+  $('iPlace').textContent = 'Looking up…';
+  place.id = null;
+  mapFollow = true; trackFor.id = null;
+  updateInfo(s, false);
+  renderPasses(s);
+  if (map) map.invalidateSize();
+  lastSlow = 0;
+}
+
+
+/* ====================================================================
+   STARS TAB: naked-eye stars, planets, the Moon, and bright deep-sky
+   objects, drawn on the same dial. Redrawn once a second (the sky turns
+   slowly) or immediately after a tap, flip or location change.
+   ==================================================================== */
+let mode = 'sats';
+try { const m = localStorage.getItem('skyMode'); if (m === 'stars' || m === 'sun' || m === 'ltg') mode = m; } catch (e) {}
+let showLines = true;
+try { if (localStorage.getItem('skyLines') === '0') showLines = false; } catch (e) {}
+let starSel = null, starDrawn = [], starNext = 0, bodyNow = {}, starListObjs = [];
+let rsCache = { key: null, t: 0, text: '' };
+
+/* ---------- your sky (Bortle scale) ---------- */
+// Faintest magnitude you can see by eye in each Bortle class (naked-eye
+// limiting magnitude, from the middle of each class's range), plus a short
+// description of what that sky is like.
+const BORTLE = {
+  '1':   { lim: 7.8, text: 'The darkest skies on Earth. The Milky Way casts shadows and M33 is easy to see.' },
+  '2':   { lim: 7.3, text: 'A truly dark site. The summer Milky Way is full of detail, and many star clusters are naked-eye objects.' },
+  '3':   { lim: 6.8, text: 'Countryside. Some glow on the horizon, but the Milky Way still looks complex.' },
+  '4':   { lim: 6.4, text: 'Brighter countryside. Light domes over nearby towns; the Milky Way is still impressive but less detailed.' },
+  '4.5': { lim: 6.2, text: 'Edge of the suburbs. The Milky Way is only faint low down, and clouds glow grey overhead.' },
+  '5':   { lim: 5.8, text: 'Suburbs. Light pollution in most directions; the Milky Way is washed out overhead.' },
+  '6':   { lim: 5.3, text: 'Bright suburbs. The sky glows grey up to about 35° high; the Milky Way only shows straight overhead.' },
+  '7':   { lim: 4.8, text: 'Where suburbs meet town. The whole sky is light grey and the Milky Way is all but gone.' },
+  '8':   { lim: 4.3, text: 'City. The sky is grey or orange and familiar constellations can look patchy.' },
+  '9':   { lim: 3.8, text: 'City centre. Just the Moon, planets, bright satellites, the brightest stars and the Pleiades.' }
+};
+let bortle = 'all';
+try { const b = localStorage.getItem('skyBortle'); if (b && (b === 'all' || BORTLE[b])) bortle = b; } catch (e) {}
+function bortleLimit() { return bortle === 'all' ? Infinity : BORTLE[bortle].lim; }
+function bortleNum() { return bortle === 'all' ? 0 : parseFloat(bortle); }
+function showBortle() {
+  const el = $('bortleNote');
+  if (bortle === 'all') { el.textContent = 'Showing everything. Pick your surroundings to see only what your sky lets you see.'; return; }
+  el.textContent = BORTLE[bortle].text + ' Faintest stars about magnitude ' + BORTLE[bortle].lim.toFixed(1) +
+    (BORTLE[bortle].lim > 6 ? ' (the app’s star list goes to magnitude 6, so every star is shown).' : '.');
+}
+
+const DSOS = [
+  { name: 'Andromeda Galaxy', wiki: 'Andromeda Galaxy', maxB: 7, short: 'M31', type: 'Galaxy', ra: 10.68, dec: 41.27, mag: 3.4, ly: '2.5 million' },
+  { name: 'Triangulum Galaxy', wiki: 'Triangulum Galaxy', maxB: 4, short: 'M33', type: 'Galaxy', ra: 23.46, dec: 30.66, mag: 5.7, ly: '2.7 million' },
+  { name: 'Large Magellanic Cloud', wiki: 'Large Magellanic Cloud', maxB: 6, short: 'LMC', type: 'Galaxy', ra: 80.89, dec: -69.76, mag: 0.9, ly: '160,000' },
+  { name: 'Small Magellanic Cloud', wiki: 'Small Magellanic Cloud', maxB: 6, short: 'SMC', type: 'Galaxy', ra: 13.19, dec: -72.83, mag: 2.7, ly: '200,000' },
+  { name: 'Orion Nebula', wiki: 'Orion Nebula', maxB: 7, short: 'M42', type: 'Nebula', ra: 83.82, dec: -5.39, mag: 4.0, ly: '1,340' },
+  { name: 'Lagoon Nebula', wiki: 'Lagoon Nebula', maxB: 4, short: 'M8', type: 'Nebula', ra: 270.9, dec: -24.38, mag: 6.0, ly: '4,100' },
+  { name: 'Carina Nebula', wiki: 'Carina Nebula', maxB: 6, short: 'NGC 3372', type: 'Nebula', ra: 161.26, dec: -59.87, mag: 1.0, ly: '8,500' },
+  { name: 'Pleiades (Seven Sisters)', wiki: 'Pleiades', maxB: 9, short: 'M45', type: 'Star cluster', ra: 56.75, dec: 24.12, mag: 1.6, ly: '444' },
+  { name: 'Hyades', wiki: 'Hyades (star cluster)', maxB: 8, short: 'Hyades', type: 'Star cluster', ra: 66.75, dec: 15.87, mag: 0.5, ly: '153' },
+  { name: 'Beehive Cluster', wiki: 'Beehive Cluster', maxB: 6, short: 'M44', type: 'Star cluster', ra: 130.1, dec: 19.67, mag: 3.7, ly: '580' },
+  { name: 'Double Cluster', wiki: 'Double Cluster', maxB: 5, short: 'NGC 869/884', type: 'Star cluster', ra: 35.0, dec: 57.13, mag: 3.7, ly: '7,500' },
+  { name: 'Hercules Globular Cluster', wiki: 'Messier 13', maxB: 3, short: 'M13', type: 'Globular cluster', ra: 250.42, dec: 36.46, mag: 5.8, ly: '22,200' },
+  { name: 'Ptolemy Cluster', wiki: 'Ptolemy Cluster', maxB: 5, short: 'M7', type: 'Star cluster', ra: 268.47, dec: -34.79, mag: 3.3, ly: '980' },
+  { name: 'Butterfly Cluster', wiki: 'Butterfly Cluster', maxB: 4, short: 'M6', type: 'Star cluster', ra: 265.08, dec: -32.25, mag: 4.2, ly: '1,600' },
+  { name: 'Omega Centauri', wiki: 'Omega Centauri', maxB: 6, short: 'ω Cen', type: 'Globular cluster', ra: 201.7, dec: -47.48, mag: 3.9, ly: '17,000' },
+  { name: '47 Tucanae', wiki: '47 Tucanae', maxB: 6, short: '47 Tuc', type: 'Globular cluster', ra: 6.02, dec: -72.08, mag: 4.1, ly: '13,000' }
+].map(d => Object.assign({ kind: 'dso' }, d));
+// maxB = the brightest (most light-polluted) Bortle class it can still be seen
+// from by eye, based on the Bortle scale descriptions
+
+const BODIES = [
+  { name: 'Sun', color: '#FFD25C' }, { name: 'Moon', color: '#F1EDE0' },
+  { name: 'Mercury', color: '#D8C8B0' }, { name: 'Venus', color: '#FFF3D1' },
+  { name: 'Mars', color: '#FF8A5C' }, { name: 'Jupiter', color: '#F2D7A8' },
+  { name: 'Saturn', color: '#E8D08B' }, { name: 'Uranus', color: '#9FE3E0' }
+];
+
+// Equatorial (degrees) -> horizon (radians, azimuth from north through east)
+function altAz(raDeg, decDeg, lst, lat) {
+  const ha = lst - raDeg * D2R, dec = decDeg * D2R;
+  const el = Math.asin(Math.sin(dec) * Math.sin(lat) + Math.cos(dec) * Math.cos(lat) * Math.cos(ha));
+  const az = Math.atan2(-Math.sin(ha) * Math.cos(dec),
+                        Math.sin(dec) * Math.cos(lat) - Math.cos(dec) * Math.sin(lat) * Math.cos(ha));
+  return { el, az: (az + 2 * Math.PI) % (2 * Math.PI) };
+}
+function bvColor(bv) {
+  return bv < 0 ? '#B4C8FF' : bv < 0.3 ? '#D8E3FF' : bv < 0.6 ? '#FFFFFF'
+       : bv < 1.0 ? '#FFF0D0' : bv < 1.4 ? '#FFD8A8' : '#FFC08C';
+}
+// Faintest magnitude a typical eye can see for a given Sun elevation (degrees)
+function limitMag(sunEl) { return sunEl > 0 ? -4 : sunEl > -6 ? 1 : sunEl > -12 ? 3 : sunEl > -18 ? 5 : 6; }
+function starObj(i) {
+  return { kind: 'star', i, name: STAR_NAMES[i] || 'Unnamed star',
+           ra: STARS[i * 4] / 100, dec: STARS[i * 4 + 1] / 100, mag: STARS[i * 4 + 2] / 100, bv: STARS[i * 4 + 3] / 100 };
+}
+function objKey(o) { return o.kind === 'star' ? 's' + o.i : o.kind + ':' + o.name; }
+
+function starFrame(force) {
+  const t = Date.now();
+  if (!force && t < starNext) return;
+  starNext = t + 1000;
+  const date = new Date(t);
+  const w = fitCanvas();
+  const l = loc || DEFAULT_LOC, lat = l.lat * D2R;
+  const lst = satellite.gstime(date) + l.lon * D2R;
+  const time = Astronomy.MakeTime(date);
+  const aobs = new Astronomy.Observer(l.lat, l.lon, 0);
+  $('clock').textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // Sun, Moon and planets
+  bodyNow = {};
+  for (const b of BODIES) {
+    const eq = Astronomy.Equator(b.name, time, aobs, true, true);
+    const h = Astronomy.Horizon(time, aobs, eq.ra, eq.dec, 'normal');
+    const il = Astronomy.Illumination(b.name, time);
+    bodyNow[b.name] = { kind: b.name === 'Sun' ? 'sun' : b.name === 'Moon' ? 'moon' : 'planet',
+      name: b.name, color: b.color, ra: eq.ra * 15, dec: eq.dec, dist: eq.dist,
+      el: h.altitude * D2R, az: h.azimuth * D2R, mag: il.mag, phase: il.phase_fraction };
+  }
+  const sunEl = bodyNow.Sun.el * R2D;
+  const lim = limitMag(sunEl);
+  const bLim = bortleLimit(), bNum = bortleNum();
+  drawDial(w, sunEl, bodyNow.Sun.az);
+  starDrawn = [];
+  const listCands = [];
+
+  // Constellation lines
+  if (showLines) {
+    ctx.strokeStyle = 'rgba(140,170,210,0.3)'; ctx.lineWidth = 1;
+    for (const poly of CONST_LINES) {
+      ctx.beginPath();
+      let pen = false;
+      for (let i = 0; i < poly.length; i += 2) {
+        const p = altAz(poly[i] / 100, poly[i + 1] / 100, lst, lat);
+        if (p.el < 0) { pen = false; continue; }
+        const q = project(p.az, p.el);
+        pen ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y);
+        pen = true;
+      }
+      ctx.stroke();
+    }
+  }
+
+  // Stars, faintest first so bright ones sit on top. Zooming in makes them a
+  // little bigger and names fainter ones too.
+  const zl = Math.log2(Math.max(1, geom.zf));
+  const starScale = Math.min(1 + zl * 0.3, 2.2);
+  const labelMag = 1.3 + zl * 1.1;
+  for (let i = STARS.length / 4 - 1; i >= 0; i--) {
+    const mag = STARS[i * 4 + 2] / 100;
+    if (mag > bLim) continue;                                       // too faint for your sky
+    const p = altAz(STARS[i * 4] / 100, STARS[i * 4 + 1] / 100, lst, lat);
+    if (p.el < 0) continue;
+    const q = project(p.az, p.el);
+    if (STAR_NAMES[i] && !/^\S+ \S{3}$/.test(STAR_NAMES[i])) listCands.push({ o: null, i, mag, p });
+    if (offScreen(q, 10)) continue;                                 // zoomed in: skip what's off screen
+    ctx.globalAlpha = mag <= lim ? (mag > 4.5 ? 0.6 : 1) : 0.18;   // fade stars too faint to see right now
+    ctx.fillStyle = bvColor(STARS[i * 4 + 3] / 100);
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, starScale * Math.min(4, Math.max(0.5, 0.45 + (6 - mag) * 0.45)), 0, 2 * Math.PI);
+    ctx.fill();
+    starDrawn.push({ x: q.x, y: q.y, mag, i });
+    if (mag < labelMag && STAR_NAMES[i]) {
+      ctx.globalAlpha = mag <= lim ? 0.75 : 0.25;
+      ctx.fillStyle = '#B9C9D9'; ctx.font = '11px Jost, system-ui, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(STAR_NAMES[i], q.x + 6, q.y);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Galaxies, nebulas and clusters
+  for (const d of DSOS) {
+    if (bNum > d.maxB) continue;                                    // washed out by light pollution
+    const p = altAz(d.ra, d.dec, lst, lat);
+    if (p.el < 0) continue;
+    const q = project(p.az, p.el);
+    ctx.globalAlpha = d.mag <= lim ? 1 : 0.3;
+    ctx.strokeStyle = '#C8A55E'; ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    if (d.type === 'Galaxy') ctx.ellipse(q.x, q.y, 7, 3.5, -0.5, 0, 2 * Math.PI);
+    else ctx.arc(q.x, q.y, 5, 0, 2 * Math.PI);
+    if (d.type === 'Nebula') { ctx.setLineDash([2, 2]); }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#D9BE85'; ctx.font = '11px Jost, system-ui, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(d.short, q.x + 9, q.y);
+    starDrawn.push({ x: q.x, y: q.y, mag: d.mag - 2, o: d });
+    listCands.push({ o: d, mag: d.mag, p });
+  }
+  ctx.globalAlpha = 1;
+
+  // Planets, Moon and Sun
+  for (const b of BODIES) {
+    const o = bodyNow[b.name];
+    if (o.el < 0) continue;
+    if (o.kind === 'planet' && o.mag > bLim) continue;              // e.g. Uranus from a town
+    const q = project(o.az, o.el);
+    const r = o.kind === 'sun' ? 9 : o.kind === 'moon' ? 8 : 4;
+    ctx.save();
+    ctx.shadowColor = o.color; ctx.shadowBlur = o.kind === 'planet' ? 6 : 12;
+    ctx.fillStyle = o.color;
+    ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 2 * Math.PI); ctx.fill();
+    ctx.restore();
+    if (o.kind === 'moon') {            // rough phase: shade the unlit fraction
+      ctx.fillStyle = 'rgba(15,31,54,0.85)';
+      ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = o.color;
+      ctx.beginPath(); ctx.ellipse(q.x, q.y, Math.max(0.5, r * o.phase), r, 0, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.fillStyle = o.color; ctx.font = '500 12px Jost, system-ui, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.kind === 'moon' ? 'Moon ' + Math.round(o.phase * 100) + '%' : o.name, q.x + r + 4, q.y);
+    starDrawn.push({ x: q.x, y: q.y, mag: -30, o });
+    if (o.kind !== 'sun') listCands.push({ o, mag: o.mag, p: o });
+  }
+
+  // Highlight the selected object
+  if (starSel) {
+    const p = posOf(starSel, lst, lat);
+    if (p && p.el >= 0) {
+      const q = project(p.az, p.el);
+      ctx.strokeStyle = '#FFB45C'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(q.x, q.y, 12, 0, 2 * Math.PI); ctx.stroke();
+    }
+    updateStarInfo(starSel, lst, lat, time, aobs, sunEl);
+  }
+
+  if (starSel) {
+    const sp = posOf(starSel.kind === 'star' || starSel.kind === 'dso' ? starSel : bodyNow[starSel.name], lst, lat);
+    setZoomCap(starSel.kind === 'moon' ? 'The Moon' : starSel.name,
+      (sp.el >= 0 ? Math.round(sp.el * R2D) + '° up, ' + compass(sp.az * R2D) : 'Below the horizon') + '. Tap for details');
+  } else setZoomCap('', '');
+  renderSkyNote(sunEl, time, aobs);
+  renderStarList(listCands);
+}
+
+function posOf(o, lst, lat) {
+  if (o.kind === 'planet' || o.kind === 'moon' || o.kind === 'sun') return bodyNow[o.name];
+  return altAz(o.ra, o.dec, lst, lat);
+}
+
+function renderSkyNote(sunEl, time, aobs) {
+  let txt;
+  if (sunEl > 0) {
+    const set = Astronomy.SearchRiseSet('Sun', aobs, -1, time, 1);
+    txt = 'The Sun is up, so only the Moon and sometimes Venus show. Stars appear after sunset' +
+          (set ? ' (' + clock(set.date.getTime()) + ')' : '') + '. Faded dots show what’s there.';
+  } else if (sunEl > -6) txt = 'Twilight: only the brightest stars and planets are showing so far.';
+  else if (sunEl > -12) txt = 'Getting dark: the main constellations are appearing.';
+  else if (sunEl > -18) txt = 'Nearly dark: most stars are out. Fainter ones need a little longer.';
+  else txt = bortle === 'all'
+    ? 'Fully dark. From a town you’ll see stars down to about magnitude 4; somewhere really dark, all of them.'
+    : 'Fully dark. From your surroundings you should see stars down to about magnitude ' + bortleLimit().toFixed(1) + '.';
+  const m = bodyNow.Moon;
+  if (sunEl <= 0 && m && m.el > 0 && m.phase > 0.6) txt += ' The bright Moon will wash out the faintest stars.';
+  $('skyNote').textContent = txt;
+}
+
+function renderStarList(cands) {
+  cands.sort((a, b) => a.mag - b.mag);
+  starListObjs = cands.slice(0, 20).map(c => c.o || starObj(c.i));
+  const ul = $('starList');
+  ul.textContent = '';
+  starListObjs.forEach((o, n) => {
+    const c = cands[n];
+    const li = document.createElement('li');
+    li.dataset.n = n;
+    if (starSel && objKey(starSel) === objKey(o)) li.classList.add('sel');
+    const name = document.createElement('span');
+    name.textContent = o.kind === 'moon' ? 'Moon' : o.name;
+    const kind = document.createElement('span'); kind.className = 'kind';
+    kind.textContent = o.kind === 'planet' ? 'planet' : o.kind === 'dso' ? o.type.toLowerCase() : o.kind === 'star' ? 'star' : '';
+    name.append(kind);
+    const pos = document.createElement('span'); pos.className = 'pos';
+    pos.textContent = Math.round(c.p.el * R2D) + '° ' + compass(c.p.az * R2D);
+    li.append(name, pos);
+    ul.append(li);
+  });
+}
+
+function brightnessWords(mag) {
+  return mag <= 0 ? 'very bright' : mag <= 2 ? 'bright' : mag <= 4 ? 'easy to see from a town'
+       : mag <= 5 ? 'needs a darker sky' : 'needs a very dark sky';
+}
+
+function riseSetText(o, time, aobs, upNow) {
+  const key = objKey(o) + '|' + aobs.latitude.toFixed(2) + ',' + aobs.longitude.toFixed(2);
+  if (rsCache.key === key && Date.now() - rsCache.t < 60000) return rsCache.text;
+  let body;
+  if (o.kind === 'planet' || o.kind === 'moon' || o.kind === 'sun') body = o.name;
+  else { Astronomy.DefineStar(Astronomy.Body.Star1, o.ra / 15, o.dec, 1000); body = Astronomy.Body.Star1; }
+  let text;
+  try {
+    const rise = Astronomy.SearchRiseSet(body, aobs, +1, time, 1.2);
+    const set = Astronomy.SearchRiseSet(body, aobs, -1, time, 1.2);
+    if (!rise && !set) text = upNow ? 'Never sets from here: it’s up all night, every night' : 'Never rises from where you are';
+    else {
+      const parts = [];
+      if (rise) parts.push({ t: rise.date.getTime(), s: 'rises ' + dayTime(rise.date.getTime()) });
+      if (set) parts.push({ t: set.date.getTime(), s: 'sets ' + dayTime(set.date.getTime()) });
+      parts.sort((a, b) => a.t - b.t);
+      text = parts.map(p => p.s).join(', then ');
+      text = text.charAt(0).toUpperCase() + text.slice(1);
+    }
+  } catch (e) { text = 'Couldn’t work this out'; }
+  rsCache = { key, t: Date.now(), text };
+  return text;
+}
+
+function updateStarInfo(o, lst, lat, time, aobs, sunEl) {
+  if (o.kind === 'planet' || o.kind === 'moon' || o.kind === 'sun') o = bodyNow[o.name];
+  const p = posOf(o, lst, lat);
+  $('starInfo').hidden = false;
+  $('sName').textContent = o.kind === 'moon' ? 'The Moon' : o.name;
+  $('sType').textContent = o.kind === 'star' ? 'Star' : o.kind === 'planet' ? 'Planet'
+    : o.kind === 'moon' ? 'Moon, ' + Math.round(o.phase * 100) + '% lit' : o.kind === 'sun' ? 'Our star' : o.type;
+  try { $('sCon').textContent = Astronomy.Constellation(o.ra / 15, o.dec).name; } catch (e) { $('sCon').textContent = ''; }
+  $('sMag').textContent = 'Magnitude ' + o.mag.toFixed(1) + ', ' + brightnessWords(o.mag) + ' (lower numbers are brighter)';
+  $('sEl').textContent = p.el >= 0 ? (p.el * R2D).toFixed(1) + '° above the horizon' : 'Below the horizon';
+  $('sAz').textContent = Math.round(p.az * R2D) + '° (' + compass(p.az * R2D) + ')';
+  $('sRise').textContent = riseSetText(o, time, aobs, p.el >= 0);
+  let dist = '';
+  if (o.kind === 'moon') dist = Math.round(o.dist * 149597870.7).toLocaleString() + ' km';
+  else if (o.kind === 'planet' || o.kind === 'sun')
+    dist = Math.round(o.dist * 149.5978707).toLocaleString() + ' million km';
+  else if (o.kind === 'dso') dist = o.ly + ' light years';
+  $('sDist').textContent = dist;
+  $('sDist').hidden = $('sDistT').hidden = !dist;
+  const lim = Math.min(limitMag(sunEl), bortleLimit());
+  const washedOut = o.kind === 'dso' ? bortleNum() > o.maxB : o.mag > bortleLimit();
+  $('sSeen').textContent =
+      p.el < 0 ? 'No, it’s below the horizon'
+    : o.kind === 'sun' ? 'Never look directly at the Sun'
+    : washedOut ? 'Not from your surroundings; it needs a darker sky'
+    : o.mag <= lim || (o.kind === 'dso' && limitMag(sunEl) >= 6)
+        ? (p.el < 10 * D2R ? 'Yes, but it’s low, so buildings or haze may hide it' : 'Yes')
+    : sunEl > 0 ? 'Not until after dark'
+    : o.mag <= 6.5 ? 'Only once the sky is darker' : 'Not by eye';
+}
+
+
+/* ---------- "More info" for satellites, stars and everything else ---------- */
+const moreCache = {};
+const OWNERS = { US: 'United States', CIS: 'Russia (or former USSR)', PRC: 'China', UK: 'United Kingdom', FR: 'France',
+  ESA: 'European Space Agency', JPN: 'Japan', IND: 'India', ISS: 'International Space Station partners', GER: 'Germany',
+  CA: 'Canada', IT: 'Italy', SPN: 'Spain', SKOR: 'South Korea', NKOR: 'North Korea', ISRA: 'Israel', IRAN: 'Iran',
+  AUS: 'Australia', BRAZ: 'Brazil', EUME: 'EUMETSAT', EUTE: 'Eutelsat', SES: 'SES', ITSO: 'Intelsat',
+  GLOB: 'Globalstar', ORB: 'Orbcomm', IRID: 'Iridium', O3B: 'SES O3b', UAE: 'United Arab Emirates', TURK: 'Turkey',
+  LUXE: 'Luxembourg', NETH: 'Netherlands', SWED: 'Sweden', NOR: 'Norway', FIN: 'Finland', ARGN: 'Argentina',
+  TWN: 'Taiwan', SAFR: 'South Africa', NZ: 'New Zealand', SING: 'Singapore', INDO: 'Indonesia', MEX: 'Mexico' };
+const SITES = { AFETR: 'Cape Canaveral, Florida', AFWTR: 'Vandenberg, California', TYMSC: 'Baikonur, Kazakhstan',
+  PLMSC: 'Plesetsk, Russia', VOSTO: 'Vostochny, Russia', KYMSC: 'Kapustin Yar, Russia', JSC: 'Jiuquan, China',
+  XSC: 'Xichang, China', TSC: 'Taiyuan, China', WSC: 'Wenchang, China', YSLA: 'Yellow Sea, China (sea launch)',
+  FRGUI: 'Kourou, French Guiana', SRILR: 'Sriharikota, India', TNSTA: 'Tanegashima, Japan', KSCUT: 'Uchinoura, Japan',
+  RLLB: 'Mahia Peninsula, New Zealand (Rocket Lab)', WRAS: 'Wallops Island, Virginia', KODAK: 'Kodiak, Alaska',
+  NSC: 'Naro, South Korea', SEMLS: 'Semnan, Iran', SVOBO: 'Svobodny, Russia', DLS: 'Dombarovsky, Russia',
+  SEAL: 'Pacific Ocean (Sea Launch)', AFSPC: 'US Air Force', KWAJ: 'Kwajalein Atoll' };
+const TYPES = { PAY: 'Working payload (a satellite)', 'R/B': 'Spent rocket stage', DEB: 'Debris', UNK: 'Unknown' };
+const STATUS = { '+': 'Working', '-': 'Not working', P: 'Partly working', B: 'Backup', S: 'Spare',
+  X: 'Extended mission', D: 'Re-entered and burned up', '?': 'Unknown' };
+
+function fmtPeriod(min) {
+  if (min < 120) return min.toFixed(1) + ' min';
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return h + ' h ' + m + ' min';
+}
+function starTempK(bv) { return 4600 * (1 / (0.92 * bv + 1.7) + 1 / (0.92 * bv + 0.62)); }
+function starColourWords(bv) {
+  return bv < 0 ? 'Blue-white' : bv < 0.3 ? 'White, tinged blue' : bv < 0.6 ? 'White to yellow-white'
+       : bv < 1.0 ? 'Yellow, like the Sun' : bv < 1.4 ? 'Orange' : 'Orange-red';
+}
+function addFacts(el, facts) {
+  const dl = document.createElement('dl');
+  facts.filter(f => f && f[1]).forEach(([k, v]) => {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    dl.append(dt, dd);
+  });
+  el.append(dl);
+}
+function addWiki(el, wiki, about) {
+  if (!wiki) {
+    const p = document.createElement('p'); p.className = 'hint';
+    p.textContent = 'No encyclopedia article found for this one.';
+    el.append(p); return;
+  }
+  const h = document.createElement('h4'); h.textContent = about || wiki.title;
+  const p = document.createElement('p'); p.textContent = wiki.extract || wiki.desc;
+  const a = document.createElement('a');
+  a.href = wiki.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Read more on Wikipedia';
+  const c = document.createElement('p'); c.className = 'hint'; c.textContent = 'Text and picture from Wikipedia (CC BY-SA).';
+  el.append(h, p, a, c);
+}
+function addPic(el, wiki) {
+  if (!wiki || !wiki.thumb) return;
+  const img = document.createElement('img');
+  img.className = 'moreImg'; img.src = wiki.thumb; img.alt = wiki.title; img.loading = 'lazy';
+  el.prepend(img);
+}
+function closeMore(prefix) {
+  $(prefix + 'More').hidden = true;
+  $(prefix + 'More').textContent = '';
+  $(prefix + 'MoreBtn').textContent = 'More info';
+  $(prefix + 'MoreBtn').setAttribute('aria-expanded', 'false');
+}
+function openMore(prefix, key, fetcher, render) {
+  const box = $(prefix + 'More'), btn = $(prefix + 'MoreBtn');
+  if (!box.hidden) { closeMore(prefix); return; }
+  box.hidden = false; btn.textContent = 'Less info'; btn.setAttribute('aria-expanded', 'true');
+  box.dataset.key = key;
+  const show = data => { if (box.dataset.key !== key || box.hidden) return; box.textContent = ''; render(box, data); };
+  if (moreCache[key]) { show(moreCache[key]); return; }
+  box.textContent = 'Looking that up…';
+  fetcher(data => { moreCache[key] = data; show(data); },
+          err => { if (box.dataset.key === key) box.textContent = 'Couldn’t get more info right now. ' + (err && err.message ? err.message : ''); });
+}
+
+// Satellites
+function satMore() {
+  const s = selected;
+  if (!s) return;
+  openMore('i', 'sat:' + s.id,
+    (ok, bad) => google.script.run.withSuccessHandler(t => ok(JSON.parse(t))).withFailureHandler(bad).getSatInfo(s.id, s.name),
+    (box, d) => {
+      const c = d.cat || {}, r = s.rec;
+      const a = r.a * 6378.135;
+      const rcs = Number(c.RCS);
+      addFacts(box, [
+        ['Owner', c.OWNER ? (OWNERS[c.OWNER] || c.OWNER) : ''],
+        ['Launched', c.LAUNCH_DATE ? new Date(c.LAUNCH_DATE + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) +
+                     (c.LAUNCH_SITE ? ', ' + (SITES[c.LAUNCH_SITE] || c.LAUNCH_SITE) : '') : ''],
+        ['Type', c.OBJECT_TYPE ? (TYPES[c.OBJECT_TYPE] || c.OBJECT_TYPE) : ''],
+        ['Status', c.OPS_STATUS_CODE ? (STATUS[c.OPS_STATUS_CODE] || c.OPS_STATUS_CODE) : ''],
+        ['Goes round Earth', 'once every ' + fmtPeriod(2 * Math.PI / r.no)],
+        ['Height range', Math.round(a * (1 - r.ecco) - 6378.135).toLocaleString() + ' to ' +
+                         Math.round(a * (1 + r.ecco) - 6378.135).toLocaleString() + ' km'],
+        ['Orbit tilt', (r.inclo * R2D).toFixed(1) + '° to the equator'],
+        ['Size on radar', isFinite(rcs) && c.RCS != null && c.RCS !== '' ? (rcs < 0.1 ? 'Small' : rcs < 1 ? 'Medium' : 'Large') +
+                          ' (' + rcs.toFixed(2) + ' m²)' : ''],
+        ['Catalogue number', '#' + s.id + (s.intl || c.OBJECT_ID ? ', international ID ' + (s.intl || c.OBJECT_ID) : '')]
+      ]);
+      addWiki(box, d.wiki, d.wiki && d.general ? 'About ' + d.wiki.title : '');
+      addPic(box, d.wiki);
+    });
+}
+
+// Stars, planets, the Moon, the Sun, galaxies, nebulas and clusters
+function starMore() {
+  let o = starSel;
+  if (!o) return;
+  if (o.kind === 'planet' || o.kind === 'moon' || o.kind === 'sun') o = bodyNow[o.name] || o;
+  let titles, must = '', about = '', facts = [];
+  let con = '';
+  try { con = Astronomy.Constellation(o.ra / 15, o.dec).name; } catch (e) {}
+  if (o.kind === 'star') {
+    const named = o.name !== 'Unnamed star' && !/^\S+ \S{3}$/.test(o.name);
+    if (named) { titles = [o.name + ' (star)', o.name]; must = 'star'; }
+    else { titles = [con + ' (constellation)', con]; must = 'constellation'; about = 'About ' + con + ', the constellation it’s in'; }
+    if (isFinite(o.bv)) {
+      const k = starTempK(o.bv);
+      facts = [['Colour', starColourWords(o.bv)],
+               ['Surface temperature', 'about ' + (Math.round((k - 273) / 100) * 100).toLocaleString() + ' °C (the Sun is about 5,500 °C)']];
+    }
+  } else if (o.kind === 'planet') { titles = [o.name + ' (planet)', o.name]; must = 'planet'; }
+  else if (o.kind === 'moon') titles = ['Moon'];
+  else if (o.kind === 'sun') titles = ['Sun'];
+  else { titles = [o.wiki || o.name]; facts = [['Short name', o.short]]; }
+  openMore('s', 'obj:' + objKey(o),
+    (ok, bad) => google.script.run.withSuccessHandler(t => ok(JSON.parse(t))).withFailureHandler(bad).getWiki(titles, must),
+    (box, wiki) => { if (facts.length) addFacts(box, facts); addWiki(box, wiki, about); addPic(box, wiki); });
+}
+
+function selectStar(o) {
+  if (!starSel || !o || objKey(starSel) !== objKey(o)) closeMore('s');
+  starSel = o;
+  rsCache.key = null;
+  if (!o) $('starInfo').hidden = true;
+  starNext = 0;
+}
+
+function setMode(m) {
+  mode = m;
+  document.body.dataset.mode = m;
+  $('tabSats').setAttribute('aria-selected', String(m === 'sats'));
+  $('tabStars').setAttribute('aria-selected', String(m === 'stars'));
+  $('tabSun').setAttribute('aria-selected', String(m === 'sun'));
+  $('tabLtg').setAttribute('aria-selected', String(m === 'ltg'));
+  try { localStorage.setItem('skyMode', m); } catch (e) {}
+  if (m === 'sun' || m === 'ltg') exitZoom();
+  if (m === 'ltg' && ltgMap) setTimeout(() => ltgMap.invalidateSize(), 50);
+  starNext = 0; lastSlow = 0; sunNext = 0;
+}
+
+/* ---------- red light (both tabs) ---------- */
+// A full-screen red layer in "multiply" blend mode keeps only the red channel
+// of everything underneath (canvas, map, text), which protects night vision.
+let redOn = false;
+try { redOn = localStorage.getItem('skyRed') === '1'; } catch (e) {}
+function applyRed() {
+  document.documentElement.classList.toggle('red', redOn);
+  $('redBtn').setAttribute('aria-pressed', String(redOn));
+  $('redBtn').textContent = redOn ? 'Red light: on' : 'Red light: off';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = redOn ? '#000000' : '#0C1726';
+}
+
+
+/* ====================================================================
+   SUN & MOON TAB: sunrise/sunset, the three twilights, moonrise/moonset,
+   phase, next full and new Moon, and tides, each with a live countdown.
+   Events are worked out once and then only the countdowns tick each second.
+   ==================================================================== */
+let sunNext = 0;
+let sunCalc = { key: '', t: 0, events: [] };
+let tide = { key: '', t: 0, data: null, loading: false, err: '' };
+
+function countdown(ms) {
+  let d = Math.max(0, Math.round((ms - Date.now()) / 1000));
+  const days = Math.floor(d / 86400); d %= 86400;
+  const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60), sec = d % 60;
+  if (days) return 'in ' + days + ' d ' + h + ' h ' + m + ' min';
+  if (h) return 'in ' + h + ' h ' + String(m).padStart(2, '0') + ' min ' + String(sec).padStart(2, '0') + ' s';
+  return 'in ' + m + ' min ' + String(sec).padStart(2, '0') + ' s';
+}
+function fmtDur(ms) {
+  const m = Math.round(ms / 60000);
+  return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+}
+function dateLong(ms) {
+  return new Date(ms).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) + ', ' + clock(ms);
+}
+function phaseName(a) {
+  return a < 6 || a >= 354 ? 'New Moon' : a < 84 ? 'Waxing crescent' : a < 96 ? 'First quarter'
+       : a < 174 ? 'Waxing gibbous' : a < 186 ? 'Full Moon' : a < 264 ? 'Waning gibbous'
+       : a < 276 ? 'Last quarter' : 'Waning crescent';
+}
+// Draws the Moon's shape for a phase angle (0 new, 90 first quarter, 180 full)
+function drawMoonIcon(angle, southern) {
+  const r = 30, cx = 36, cy = 36;
+  const a = ((angle % 360) + 360) % 360;
+  const rx = Math.abs(Math.cos(a * D2R)) * r;
+  let lit;
+  if (a < 180) {           // waxing: lit on the right (from the northern hemisphere)
+    lit = 'M' + cx + ',' + (cy - r) + ' A' + r + ',' + r + ' 0 0 1 ' + cx + ',' + (cy + r) +
+          ' A' + rx + ',' + r + ' 0 0 ' + (a < 90 ? 0 : 1) + ' ' + cx + ',' + (cy - r) + 'Z';
+  } else {                 // waning: lit on the left
+    lit = 'M' + cx + ',' + (cy - r) + ' A' + r + ',' + r + ' 0 0 0 ' + cx + ',' + (cy + r) +
+          ' A' + rx + ',' + r + ' 0 0 ' + (a > 270 ? 1 : 0) + ' ' + cx + ',' + (cy - r) + 'Z';
+  }
+  $('moonIcon').innerHTML =
+    '<g' + (southern ? ' transform="translate(72,0) scale(-1,1)"' : '') + '>' +
+    '<circle cx="36" cy="36" r="30" fill="#1C3352"/>' +
+    '<path d="' + lit + '" fill="#F1EDE0"/></g>';
+}
+
+function computeSunMoon() {
+  const l = loc || DEFAULT_LOC;
+  const obs = new Astronomy.Observer(l.lat, l.lon, 0);
+  const now = new Date(), t0 = Astronomy.MakeTime(now);
+  const at = (alt, dir) => Astronomy.SearchAltitude('Sun', obs, dir, t0, 1.5, alt);
+  const ms = r => r ? r.date.getTime() : null;
+  const sun = [
+    { label: 'Astronomical twilight starts', t: ms(at(-18, +1)), dark: true },
+    { label: 'Nautical twilight starts', t: ms(at(-12, +1)) },
+    { label: 'Civil twilight starts', t: ms(at(-6, +1)) },
+    { label: 'Sunrise', t: ms(Astronomy.SearchRiseSet('Sun', obs, +1, t0, 1.5)) },
+    { label: 'Sunset', t: ms(Astronomy.SearchRiseSet('Sun', obs, -1, t0, 1.5)) },
+    { label: 'Civil twilight ends', t: ms(at(-6, -1)) },
+    { label: 'Nautical twilight ends', t: ms(at(-12, -1)) },
+    { label: 'Astronomical twilight ends', t: ms(at(-18, -1)), dark: true }
+  ];
+  const moon = [
+    { label: 'Moonrise', t: ms(Astronomy.SearchRiseSet('Moon', obs, +1, t0, 2)) },
+    { label: 'Moonset', t: ms(Astronomy.SearchRiseSet('Moon', obs, -1, t0, 2)) },
+    { label: 'Full Moon', t: ms(Astronomy.SearchMoonPhase(180, t0, 40)), long: true },
+    { label: 'New Moon', t: ms(Astronomy.SearchMoonPhase(0, t0, 40)), long: true }
+  ];
+  // Today's daylight
+  const mid = new Date(); mid.setHours(0, 0, 0, 0);
+  const tm = Astronomy.MakeTime(mid);
+  const r = Astronomy.SearchRiseSet('Sun', obs, +1, tm, 1), st = Astronomy.SearchRiseSet('Sun', obs, -1, tm, 1);
+  sunCalc = { key: l.lat.toFixed(2) + ',' + l.lon.toFixed(2), t: Date.now(), sun, moon,
+              dayLen: r && st && st.date > r.date ? st.date - r.date : null, obs };
+  renderEvents($('sunEvents'), sun, 'Not in the next 36 hours. At this time of year it never gets that dark here.');
+  renderEvents($('moonEvents'), moon, 'Not in the next 2 days');
+  $('dayLen').textContent = sunCalc.dayLen ? 'Daylight today: ' + fmtDur(sunCalc.dayLen) : '';
+}
+
+function renderEvents(ul, list, noneText) {
+  ul.textContent = '';
+  const sorted = list.filter(e => e.t).sort((a, b) => a.t - b.t).concat(list.filter(e => !e.t));
+  sorted.forEach((e, n) => {
+    const li = document.createElement('li');
+    if (!e.t) li.className = 'none'; else if (n === 0) li.className = 'next';
+    const left = document.createElement('span');
+    left.textContent = e.label;
+    const when = document.createElement('span'); when.className = 'when';
+    when.textContent = e.t ? (e.long ? dateLong(e.t) : dayTime(e.t)) : '';
+    left.append(' ', when);
+    const cd = document.createElement('span'); cd.className = 'cd';
+    if (e.t) cd.dataset.t = e.t; else cd.textContent = noneText;
+    li.append(left, ' ', cd);
+    ul.append(li);
+  });
+}
+
+function tickCountdowns() {
+  document.querySelectorAll('#sunTab .cd[data-t]').forEach(el => { el.textContent = countdown(Number(el.dataset.t)); });
+}
+
+function renderNow() {
+  const l = loc || DEFAULT_LOC;
+  const obs = sunCalc.obs || new Astronomy.Observer(l.lat, l.lon, 0);
+  const t = Astronomy.MakeTime(new Date());
+  const sEq = Astronomy.Equator('Sun', t, obs, true, true);
+  const sAlt = Astronomy.Horizon(t, obs, sEq.ra, sEq.dec, 'normal').altitude;
+  $('sunNow').textContent = 'Right now: ' + (
+      sAlt > -0.833 ? 'daylight, the Sun is ' + Math.round(sAlt) + '° up'
+    : sAlt > -6 ? 'civil twilight'
+    : sAlt > -12 ? 'nautical twilight'
+    : sAlt > -18 ? 'astronomical twilight'
+    : 'night, properly dark');
+
+  const angle = Astronomy.MoonPhase(t);
+  const ill = Astronomy.Illumination('Moon', t);
+  const mEq = Astronomy.Equator('Moon', t, obs, true, true);
+  const mAlt = Astronomy.Horizon(t, obs, mEq.ra, mEq.dec, 'normal').altitude;
+  drawMoonIcon(angle, l.lat < 0);
+  $('moonPhase').textContent = phaseName(angle) + ', ' + Math.round(ill.phase_fraction * 100) + '% lit';
+  $('moonSub').textContent = (angle / 360 * 29.53).toFixed(1) + ' days since the last New Moon. ' +
+    (mAlt > 0 ? 'It’s up now, ' + Math.round(mAlt) + '° above the horizon.' : 'It’s below the horizon now.');
+}
+
+/* ---------- tides ---------- */
+function loadTides() {
+  const l = loc || DEFAULT_LOC;
+  const key = l.lat.toFixed(2) + ',' + l.lon.toFixed(2);
+  if (tide.loading || (tide.key === key && Date.now() - tide.t < 3 * 3600e3)) return;
+  tide.loading = true;
+  google.script.run
+    .withSuccessHandler(text => {
+      tide = { key, t: Date.now(), data: JSON.parse(text), loading: false, err: '' };
+      renderTides();
+    })
+    .withFailureHandler(err => {
+      tide = { key, t: Date.now() - 3 * 3600e3 + 120000, data: null, loading: false,   // retry in 2 min
+               err: (err && err.message) ? err.message : String(err) };
+      renderTides();
+    })
+    .getTides(l.lat, l.lon);
+}
+// High and low waters from the 15-minute series, refined with a parabola
+function tideExtremes(T, H) {
+  const ex = [];
+  for (let i = 1; i < H.length - 1; i++) {
+    const a = H[i - 1], b = H[i], c = H[i + 1];
+    if (a == null || b == null || c == null) continue;
+    const hi = b > a && b >= c, lo = b < a && b <= c;
+    if (!hi && !lo) continue;
+    const den = a - 2 * b + c, off = den ? 0.5 * (a - c) / den : 0;   // -0.5..0.5 steps
+    const step = T[i + 1] - T[i];
+    ex.push({ hi, t: (T[i] + off * step) * 1000, h: b - 0.25 * (a - c) * off });
+  }
+  // Tidy up small wiggles: merge neighbours of the same kind, drop tiny swings
+  const out = [];
+  for (const e of ex) {
+    const last = out[out.length - 1];
+    if (last && last.hi === e.hi) { if (e.hi ? e.h > last.h : e.h < last.h) out[out.length - 1] = e; continue; }
+    if (last && Math.abs(e.h - last.h) < 0.15) { out.pop(); continue; }
+    out.push(e);
+  }
+  return out;
+}
+function tideAt(T, H, ms) {
+  const x = ms / 1000;
+  for (let i = 0; i < T.length - 1; i++) {
+    if (T[i] <= x && x <= T[i + 1] && H[i] != null && H[i + 1] != null)
+      return H[i] + (H[i + 1] - H[i]) * (x - T[i]) / (T[i + 1] - T[i]);
+  }
+  return null;
+}
+function renderTides() {
+  const ul = $('tideEvents'), chart = $('tideChart');
+  ul.textContent = ''; chart.textContent = '';
+  if (tide.err) {
+    $('tideNow').textContent = 'Couldn’t load tides right now';
+    $('tideNote').textContent = tide.err;
+    return;
+  }
+  if (!tide.data) { $('tideNow').textContent = 'Loading tides…'; $('tideNote').textContent = ''; return; }
+  const T = tide.data.t || [], H = tide.data.h || [];
+  if (!H.some(v => v != null)) {
+    $('tideNow').textContent = 'No tide data for this spot';
+    $('tideNote').textContent = 'Tides are only available at or near the coast. Set a coastal location to see them.';
+    return;
+  }
+  const now = Date.now();
+  const h = tideAt(T, H, now), h2 = tideAt(T, H, now + 15 * 60000);
+  const ex = tideExtremes(T, H).filter(e => e.t > now).slice(0, 4);
+  $('tideNow').textContent = h == null ? 'Tide height unavailable right now'
+    : 'Now ' + (h >= 0 ? '+' : '') + h.toFixed(2) + ' m, ' + (h2 != null && h2 > h ? 'rising' : 'falling');
+  ex.forEach((e, n) => {
+    const li = document.createElement('li');
+    if (n === 0) li.className = 'next';
+    const left = document.createElement('span');
+    left.textContent = (e.hi ? 'High tide' : 'Low tide') + ', ' + (e.h >= 0 ? '+' : '') + e.h.toFixed(2) + ' m';
+    const when = document.createElement('span'); when.className = 'when'; when.textContent = dayTime(e.t);
+    left.append(' ', when);
+    const cd = document.createElement('span'); cd.className = 'cd'; cd.dataset.t = e.t;
+    li.append(left, ' ', cd); ul.append(li);
+  });
+  // Little chart: 6 hours back to 24 hours ahead
+  const t0 = now - 6 * 3600e3, t1 = now + 24 * 3600e3, W = 340, Hh = 110, pad = 8;
+  const pts = [];
+  for (let i = 0; i < T.length; i++) {
+    const ms = T[i] * 1000;
+    if (ms >= t0 && ms <= t1 && H[i] != null) pts.push([ms, H[i]]);
+  }
+  if (pts.length > 2) {
+    const lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]));
+    const X = ms => pad + (ms - t0) / (t1 - t0) * (W - 2 * pad);
+    const Y = v => pad + (hi - v) / ((hi - lo) || 1) * (Hh - 2 * pad - 14);
+    const line = pts.map(p => X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join(' ');
+    let marks = '';
+    ex.forEach(e => {
+      if (e.t > t1) return;
+      marks += '<text x="' + X(e.t).toFixed(1) + '" y="' + (e.hi ? Y(e.h) - 4 : Y(e.h) + 12).toFixed(1) +
+               '" fill="#8197AD" font-size="10" text-anchor="middle">' + (e.hi ? 'H ' : 'L ') + clock(e.t) + '</text>';
+    });
+    chart.innerHTML =
+      '<svg viewBox="0 0 ' + W + ' ' + Hh + '" role="img" aria-label="Tide height over the next day">' +
+      '<polyline points="' + line + '" fill="none" stroke="#7CC4FF" stroke-width="2"/>' +
+      '<line x1="' + X(now).toFixed(1) + '" x2="' + X(now).toFixed(1) + '" y1="' + pad + '" y2="' + (Hh - 14) +
+      '" stroke="#FFB45C" stroke-dasharray="3 3"/>' +
+      '<text x="' + X(now).toFixed(1) + '" y="' + (Hh - 2) + '" fill="#FFB45C" font-size="10" text-anchor="middle">now</text>' +
+      marks + '</svg>';
+  }
+  $('tideNote').textContent = 'Heights are above or below average sea level, not chart datum, so they won’t match the ' +
+    'numbers in printed tide tables. The times are the useful part. They come from a computer model at about 8 km ' +
+    'detail, so allow up to half an hour either way, and don’t use them for navigation. Tide model: Open-Meteo (Météo-France).';
+}
+
+function sunFrame() {
+  if (typeof Astronomy === 'undefined') { $('sunNow').textContent = 'The astronomy library didn’t load. Check your connection.'; return; }
+  const t = Date.now();
+  if (t < sunNext) return;
+  sunNext = t + 1000;
+  $('clock').textContent = new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const l = loc || DEFAULT_LOC;
+  const key = l.lat.toFixed(2) + ',' + l.lon.toFixed(2);
+  const passed = sunCalc.sun && sunCalc.sun.concat(sunCalc.moon).some(e => e.t && e.t < t);
+  if (sunCalc.key !== key || passed || t - sunCalc.t > 15 * 60000) computeSunMoon();
+  if (tide.key !== key || t - tide.t > 3 * 3600e3) loadTides();
+  if (tide.data && Math.floor(t / 1000) % 60 === 0) renderTides();   // keep "now" fresh each minute
+  renderNow();
+  tickCountdowns();
+}
+
+
+
+/* ====================================================================
+   LIGHTNING TAB: a map of lightning around you from the Meteosat Lightning
+   Imager, the distance and direction of each storm patch, how long its
+   thunder takes to reach you, and a flash-to-bang timer.
+   ==================================================================== */
+const SOUND_KMS = 0.343;                  // speed of sound, km per second
+let ltg = { key: '', t: 0, data: null, loading: false, err: '', hist: [] };
+let ltgMap = null, ltgLayers = null, ltgNext = 0, fb = { start: 0, hist: [] };
+
+function thunderText(km) {
+  const s = km / SOUND_KMS;
+  const t = s < 90 ? Math.round(s) + ' s' : Math.floor(s / 60) + ' min ' + Math.round(s % 60) + ' s';
+  return km <= 15 ? 'thunder takes about ' + t + ' to reach you'
+       : km <= 25 ? 'thunder would take about ' + t + ', and may be faint'
+       : 'thunder would take ' + t + ', but it’s too far to hear';
+}
+function ensureLtgMap() {
+  if (ltgMap || typeof L === 'undefined') return;
+  ltgMap = L.map('ltgMap', { scrollWheelZoom: false, dragging: !L.Browser.mobile, minZoom: 4, maxZoom: 11 });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 11, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+  }).addTo(ltgMap);
+  ltgMap.createPane('ltgPane').style.zIndex = 450;          // outside the darkened tile layer
+  const wms = L.tileLayer.wms('https://view.eumetsat.int/geoserver/mtg_fd/wms', {
+    layers: 'mtg_fd:li_afa', format: 'image/png', transparent: true, version: '1.1.1',
+    opacity: 0.9, pane: 'ltgPane', attribution: 'Lightning &copy; EUMETSAT'
+  }).addTo(ltgMap);
+  ltgLayers = { wms, rings: L.layerGroup().addTo(ltgMap), marks: L.layerGroup().addTo(ltgMap), key: '' };
+}
+function drawLtgRings(l) {
+  const key = l.lat.toFixed(3) + ',' + l.lon.toFixed(3);
+  if (ltgLayers.key === key) return;
+  ltgLayers.key = key;
+  ltgLayers.rings.clearLayers();
+  [10, 25, 50, 100, 150].forEach(km => {
+    L.circle([l.lat, l.lon], { radius: km * 1000, color: '#C8A55E', weight: 1, dashArray: '4 6', fill: false, interactive: false })
+      .addTo(ltgLayers.rings);
+    L.marker([l.lat + km / 111.32, l.lon], { interactive: false,
+      icon: L.divIcon({ className: 'ringLbl', html: km + ' km', iconSize: null }) }).addTo(ltgLayers.rings);
+  });
+  L.circleMarker([l.lat, l.lon], { radius: 5, color: '#C8A55E', weight: 2, fillColor: '#0C1726', fillOpacity: 1 })
+    .bindTooltip('You').addTo(ltgLayers.rings);
+  ltgMap.fitBounds(L.latLng(l.lat, l.lon).toBounds(300000));
+}
+function loadLightning() {
+  const l = loc || DEFAULT_LOC;
+  const key = l.lat.toFixed(1) + ',' + l.lon.toFixed(1);
+  if (ltg.loading) return;
+  ltg.loading = true;
+  google.script.run
+    .withSuccessHandler(text => {
+      const data = JSON.parse(text);
+      if (ltg.key !== key) ltg.hist = [];
+      ltg.hist = ltg.hist.filter(h => data.t - h.t < 30 * 60000 && h.t !== data.t).concat({ t: data.t, blobs: data.blobs });
+      ltg = Object.assign(ltg, { key, t: Date.now(), data, loading: false, err: '' });
+      if (ltgLayers) ltgLayers.wms.setParams({ _t: Math.floor(Date.now() / 120000) });   // fetch the newest map image
+      renderLightning();
+    })
+    .withFailureHandler(err => {
+      ltg = Object.assign(ltg, { key, t: Date.now(), loading: false, err: (err && err.message) ? err.message : String(err) });
+      renderLightning();
+    })
+    .getLightning(l.lat, l.lon);
+}
+function renderLightning() {
+  const ul = $('ltgList');
+  ul.textContent = '';
+  if (ltgLayers) {
+    ltgLayers.marks.clearLayers();
+    ltg.hist.forEach(h => {
+      const age = (Date.now() - h.t) / 60000, op = Math.max(0.15, 1 - age / 30);
+      h.blobs.forEach(b => L.circleMarker([b.lat, b.lon], {
+        radius: Math.min(9, 3 + Math.sqrt(b.px)), color: '#FFE45C', weight: 1.5, opacity: op,
+        fillColor: '#FFB45C', fillOpacity: op * 0.6
+      }).bindTooltip(b.near.toFixed(0) + ' km ' + compass(b.brg) + (age >= 1 ? ', ' + Math.round(age) + ' min ago' : '')).addTo(ltgLayers.marks));
+    });
+  }
+  if (ltg.err && !ltg.data) {
+    $('ltgNow').textContent = 'Couldn’t get lightning data right now';
+    $('ltgWhen').textContent = ltg.err + ' Trying again in 2 minutes.';
+    return;
+  }
+  if (!ltg.data) return;
+  const b = ltg.data.blobs;
+  if (!b.length) {
+    $('ltgNow').textContent = 'No lightning within ' + ltg.data.radius + ' km in the last 5 minutes.';
+  } else {
+    const n = b[0];
+    $('ltgNow').textContent = (n.near <= 8 ? 'Lightning overhead or very close, ' : 'Nearest lightning ' + n.near.toFixed(0) + ' km ' +
+      compass(n.brg) + ', ') + thunderText(Math.max(n.near, 1)) + '.';
+  }
+  b.slice(0, 10).forEach(x => {
+    const li = document.createElement('li');
+    const left = document.createElement('span');
+    left.textContent = x.near.toFixed(0) + ' km ' + compass(x.brg);
+    const when = document.createElement('span'); when.className = 'when';
+    when.textContent = 'Storm patch about ' + x.km2 + ' km²';
+    left.append(' ', when);
+    const cd = document.createElement('span'); cd.className = 'cd';
+    cd.textContent = 'Thunder ' + Math.round(Math.max(x.near, 1) / SOUND_KMS) + ' s';
+    li.append(left, ' ', cd);
+    ul.append(li);
+  });
+}
+function flashBang() {
+  if (!fb.start) {
+    fb.start = Date.now();
+    $('fbBtn').textContent = '🔊 I heard the thunder';
+    $('fbBtn').classList.add('wait');
+    return;
+  }
+  const s = (Date.now() - fb.start) / 1000;
+  fb.start = 0;
+  $('fbBtn').textContent = '⚡ I saw a flash';
+  $('fbBtn').classList.remove('wait');
+  const km = s * SOUND_KMS;
+  $('fbOut').textContent = 'Thunder took ' + s.toFixed(1) + ' s, so the strike was about ' + km.toFixed(1) +
+    ' km (' + (km / 1.609).toFixed(1) + ' miles) away.';
+  fb.hist.unshift({ t: Date.now(), s, km });
+  fb.hist = fb.hist.slice(0, 6);
+  const ul = $('fbHist'); ul.textContent = '';
+  fb.hist.forEach((h, i) => {
+    const li = document.createElement('li');
+    const left = document.createElement('span'); left.textContent = h.km.toFixed(1) + ' km';
+    const when = document.createElement('span'); when.className = 'when'; when.textContent = clock(h.t) + ', thunder after ' + h.s.toFixed(1) + ' s';
+    left.append(' ', when);
+    const trend = document.createElement('span'); trend.className = 'cd';
+    const older = fb.hist[i + 1];
+    trend.textContent = older && Date.now() - older.t < 30 * 60000
+      ? (h.km < older.km - 0.5 ? 'getting closer' : h.km > older.km + 0.5 ? 'moving away' : 'about the same') : '';
+    li.append(left, ' ', trend); ul.append(li);
+  });
+}
+function ltgFrame() {
+  const t = Date.now();
+  if (fb.start) {
+    const s = (t - fb.start) / 1000;
+    if (s > 120) {                                       // nothing heard: reset
+      fb.start = 0; $('fbBtn').textContent = '⚡ I saw a flash'; $('fbBtn').classList.remove('wait');
+      $('fbOut').textContent = 'No thunder within 2 minutes, so that flash was probably over 40 km away.';
+    } else $('fbOut').textContent = s.toFixed(1) + ' s… about ' + (s * SOUND_KMS).toFixed(1) + ' km so far';
+  }
+  if (t < ltgNext) return;
+  ltgNext = t + 1000;
+  $('clock').textContent = new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  ensureLtgMap();
+  const l = loc || DEFAULT_LOC;
+  if (ltgLayers) drawLtgRings(l);
+  const key = l.lat.toFixed(1) + ',' + l.lon.toFixed(1);
+  if (!ltg.loading && (ltg.key !== key || t - ltg.t > 120000)) loadLightning();
+  if (ltg.data) {
+    const m = Math.round((t - ltg.data.t) / 60000);
+    $('ltgWhen').textContent = 'Checked ' + (m < 1 ? 'just now' : m + ' min ago') + '. Updates every 2 minutes.' +
+      (ltg.err ? ' (Last update failed: ' + ltg.err + ')' : '');
+  }
+}
+
+function frame() {
+  if (mode === 'stars') { if (typeof Astronomy !== 'undefined') starFrame(false); }
+  else if (mode === 'sun') sunFrame();
+  else if (mode === 'ltg') ltgFrame();
+  else satFrame();
+  requestAnimationFrame(frame);
+}
+
+
+/* ====================================================================
+   SKY VIEW: hold the phone up and see what's in that part of the sky.
+   The phone's motion sensors give its direction; everything is drawn as
+   seen through the camera. Without sensors you can drag to look around.
+   ==================================================================== */
+const sv = {
+  on: false, sensor: false, manual: false, cam: false, stream: null,
+  yaw: 180 * D2R, pitch: 30 * D2R,                    // manual view: facing south, 30° up
+  f: [0, 1, 0], r: [1, 0, 0], u: [0, 0, 1],           // smoothed forward / right / up
+  vfov: 60, kx: 1, ky: 0, kOk: false, lastOri: 0,
+  starT: 0, starVec: null, lineVec: null, bodies: null, bodyT: 0,
+  drawn: [], target: null, centre: null, w: 0, h: 0
+};
+try { const f = Number(localStorage.getItem('skyFov')); if (f >= 15 && f <= 110) sv.vfov = f; } catch (e) {}
+const svCanvas = $('svCanvas'), svCtx = svCanvas.getContext('2d');
+const v3 = {
+  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
+  mix: (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
+};
+// Elevation/azimuth (radians) -> unit vector in East, North, Up
+function enu(el, az) { const c = Math.cos(el); return [c * Math.sin(az), c * Math.cos(az), Math.sin(el)]; }
+
+// ---- phone orientation ----
+function onOrientation(e) {
+  if (e.alpha == null || e.beta == null) return;
+  sv.sensor = true; sv.lastOri = Date.now();
+  let alpha = e.alpha;
+  if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
+    // iPhone: alpha has an arbitrary zero, so learn the offset to true compass north
+    const k = (e.webkitCompassHeading + e.alpha) * D2R, w = sv.kOk ? 0.03 : 1;
+    sv.kx = sv.kx * (1 - w) + Math.cos(k) * w; sv.ky = sv.ky * (1 - w) + Math.sin(k) * w; sv.kOk = true;
+    alpha = e.alpha - Math.atan2(sv.ky, sv.kx) * R2D;
+  } else if (!e.absolute) { sv.noCompass = true; }
+  const a = alpha * D2R, b = e.beta * D2R, g = e.gamma * D2R;
+  const cA = Math.cos(a), sA = Math.sin(a), cB = Math.cos(b), sB = Math.sin(b), cG = Math.cos(g), sG = Math.sin(g);
+  // Rotation from phone to East/North/Up: Rz(alpha) * Rx(beta) * Ry(gamma); columns are the phone's axes
+  const X = [cA * cG - sA * sB * sG, sA * cG + cA * sB * sG, -cB * sG];
+  const Y = [-sA * cB, cA * cB, sB];
+  const Z = [cA * sG + sA * sB * cG, sA * sG - cA * sB * cG, cB * cG];
+  const ang = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * D2R;
+  const up = v3.norm([Math.cos(ang) * Y[0] + Math.sin(ang) * X[0], Math.cos(ang) * Y[1] + Math.sin(ang) * X[1], Math.cos(ang) * Y[2] + Math.sin(ang) * X[2]]);
+  const fwd = [-Z[0], -Z[1], -Z[2]];                  // the back camera looks out of the back of the phone
+  sv.tf = fwd; sv.tu = up;
+}
+function manualBasis() {
+  const cp = Math.cos(sv.pitch), sp = Math.sin(sv.pitch), cy = Math.cos(sv.yaw), sy = Math.sin(sv.yaw);
+  sv.tf = [cp * sy, cp * cy, sp];
+  sv.tu = v3.cross(v3.norm([cy, -sy, 0]), sv.tf);
+}
+function updateBasis() {
+  if (sv.manual) manualBasis();
+  if (!sv.tf) return;
+  // smooth out sensor jitter, but jump straight there on the first reading or a big swing
+  const k = sv.manual || !sv.started || v3.dot(sv.f, sv.tf) < 0.5 || v3.dot(sv.u, sv.tu) < 0.5 ? 1 : 0.25;
+  sv.started = true;
+  sv.f = v3.norm(v3.mix(sv.f, sv.tf, k));
+  sv.u = v3.norm(v3.mix(sv.u, sv.tu, k));
+  sv.r = v3.norm(v3.cross(sv.f, sv.u));
+  sv.u = v3.cross(sv.r, sv.f);
+}
+// Sky direction -> screen point (null if behind you)
+function svProj(v) {
+  const d = v3.dot(v, sv.f);
+  if (d < 0.08) return null;
+  const foc = (sv.h / 2) / Math.tan(sv.vfov * D2R / 2);
+  return { x: sv.w / 2 + v3.dot(v, sv.r) / d * foc, y: sv.h / 2 - v3.dot(v, sv.u) / d * foc, d };
+}
+function svOn(q, pad) { return q && q.x > -pad && q.y > -pad && q.x < sv.w + pad && q.y < sv.h + pad; }
+
+// ---- what's in the sky (stars and lines cached for 2 s; the sky turns slowly) ----
+function svPrepare(now) {
+  const l = loc || DEFAULT_LOC, lat = l.lat * D2R;
+  const lst = satellite.gstime(new Date(now)) + l.lon * D2R;
+  if (!sv.starVec || now - sv.starT > 2000) {
+    sv.starT = now;
+    const n = STARS.length / 4, out = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      const p = altAz(STARS[i * 4] / 100, STARS[i * 4 + 1] / 100, lst, lat), v = enu(p.el, p.az);
+      out[i * 4] = v[0]; out[i * 4 + 1] = v[1]; out[i * 4 + 2] = v[2]; out[i * 4 + 3] = p.el;
+    }
+    sv.starVec = out;
+    sv.lineVec = CONST_LINES.map(poly => {
+      const pts = [];
+      for (let i = 0; i < poly.length; i += 2) { const p = altAz(poly[i] / 100, poly[i + 1] / 100, lst, lat); pts.push(enu(p.el, p.az)); }
+      return pts;
+    });
+    sv.dsoVec = DSOS.map(d => { const p = altAz(d.ra, d.dec, lst, lat); return { d, v: enu(p.el, p.az), el: p.el }; });
+  }
+  if (typeof Astronomy !== 'undefined' && (!sv.bodies || now - sv.bodyT > 1000)) {
+    sv.bodyT = now;
+    const time = Astronomy.MakeTime(new Date(now)), aobs = new Astronomy.Observer(l.lat, l.lon, 0);
+    sv.bodies = BODIES.map(b => {
+      const eq = Astronomy.Equator(b.name, time, aobs, true, true);
+      const h = Astronomy.Horizon(time, aobs, eq.ra, eq.dec, 'normal');
+      const il = Astronomy.Illumination(b.name, time);
+      return { kind: b.name === 'Sun' ? 'sun' : b.name === 'Moon' ? 'moon' : 'planet', name: b.name, color: b.color,
+               ra: eq.ra * 15, dec: eq.dec, el: h.altitude * D2R, az: h.azimuth * D2R, mag: il.mag, phase: il.phase_fraction,
+               v: enu(h.altitude * D2R, h.azimuth * D2R) };
+    });
+  }
+}
+
+function svFrame() {
+  if (!sv.on) return;
+  const now = Date.now();
+  const W = window.innerWidth, H = window.innerHeight, dpr = window.devicePixelRatio || 1;
+  if (svCanvas.width !== Math.round(W * dpr) || svCanvas.height !== Math.round(H * dpr)) {
+    svCanvas.width = Math.round(W * dpr); svCanvas.height = Math.round(H * dpr);
+  }
+  sv.w = W; sv.h = H;
+  svCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  updateBasis();
+  svPrepare(now);
+  const c = svCtx;
+  c.clearRect(0, 0, W, H);
+  const sunB = sv.bodies && sv.bodies[0], sunEl = sunB ? sunB.el * R2D : -30;
+  if (!sv.cam) {                                      // plain sky colour, ground darker
+    const col = skyRamp(sunEl);
+    c.fillStyle = 'rgb(' + col.map(Math.round).join(',') + ')';
+    c.fillRect(0, 0, W, H);
+  }
+  sv.drawn = [];
+  const lim = Math.min(limitMag(sunEl), bortleLimit());
+  const zoomK = 60 / sv.vfov;
+  const items = [];                                    // things that can be "in the middle"
+
+  // Ground: shade everything below the horizon
+  c.save();
+  c.fillStyle = sv.cam ? 'rgba(10,20,10,0.35)' : 'rgba(18,26,18,0.92)';
+  c.beginPath();
+  const hz = [];
+  for (let a = 0; a <= 360; a += 3) { const q = svProj(enu(0, a * D2R)); hz.push(q); }
+  // build the ground polygon from the visible stretch of horizon plus the screen edge nearest the ground
+  const dn = svProj(enu(-Math.PI / 2 + 0.001, 0));
+  const groundDir = [-v3.dot([0, 0, 1], sv.r), v3.dot([0, 0, 1], sv.u)];   // screen direction of "down"
+  let started = false;
+  hz.forEach(q => { if (q) { started ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y); started = true; } });
+  if (started) {
+    const gx = W / 2 + groundDir[0] * 4 * W, gy = H / 2 + groundDir[1] * 4 * H;
+    c.lineTo(gx, gy); c.closePath(); c.fill();
+  } else if (v3.dot(sv.f, [0, 0, 1]) < 0) c.fillRect(0, 0, W, H);   // looking straight down
+  c.restore();
+  // Horizon line and compass points
+  c.strokeStyle = 'rgba(200,165,94,0.8)'; c.lineWidth = 1.5;
+  c.beginPath(); let pen = false;
+  hz.forEach(q => { if (q && Math.abs(q.x) < 5 * W) { pen ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y); pen = true; } else pen = false; });
+  c.stroke();
+  c.font = '500 15px Jost, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'top';
+  ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'].forEach((t, i) => {
+    const q = svProj(enu(0, i * 45 * D2R));
+    if (svOn(q, 0)) { c.fillStyle = t.length === 1 ? '#E3C27A' : 'rgba(200,165,94,0.7)'; c.fillText(t, q.x, q.y + 6); }
+  });
+
+  // Constellation lines
+  if (showLines && sv.lineVec) {
+    c.strokeStyle = 'rgba(140,170,210,0.35)'; c.lineWidth = 1;
+    for (const pts of sv.lineVec) {
+      c.beginPath(); let p2 = false;
+      for (const v of pts) {
+        const q = v[2] > -0.02 ? svProj(v) : null;
+        if (!q) { p2 = false; continue; }
+        p2 ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y); p2 = true;
+      }
+      c.stroke();
+    }
+  }
+
+  // Stars
+  const labelMag = 2.3 + Math.max(0, Math.log2(zoomK)) * 1.5;
+  const sScale = Math.min(2.2, Math.max(0.8, Math.sqrt(zoomK)));
+  const n = STARS.length / 4;
+  for (let i = n - 1; i >= 0; i--) {
+    const mag = STARS[i * 4 + 2] / 100;
+    if (mag > bortleLimit() || sv.starVec[i * 4 + 3] < 0) continue;
+    const v = [sv.starVec[i * 4], sv.starVec[i * 4 + 1], sv.starVec[i * 4 + 2]];
+    const q = svProj(v);
+    if (!svOn(q, 8)) continue;
+    c.globalAlpha = mag <= lim ? 1 : 0.25;
+    c.fillStyle = bvColor(STARS[i * 4 + 3] / 100);
+    c.beginPath(); c.arc(q.x, q.y, sScale * Math.min(4.5, Math.max(0.7, 0.6 + (6 - mag) * 0.55)), 0, 2 * Math.PI); c.fill();
+    sv.drawn.push({ x: q.x, y: q.y, mag, o: null, i, v });
+    if (STAR_NAMES[i] && mag < labelMag) {
+      c.globalAlpha = mag <= lim ? 0.8 : 0.3;
+      c.fillStyle = '#C9D6E3'; c.font = '12px Jost, system-ui, sans-serif'; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.fillText(STAR_NAMES[i], q.x + 7, q.y);
+    }
+    if (mag < 3.5) items.push({ v, mag, o: null, i });
+  }
+  c.globalAlpha = 1;
+
+  // Galaxies, nebulas, clusters
+  (sv.dsoVec || []).forEach(({ d, v, el }) => {
+    if (el < 0 || bortleNum() > d.maxB) return;
+    const q = svProj(v);
+    if (!svOn(q, 20)) return;
+    c.strokeStyle = '#C8A55E'; c.lineWidth = 1.4;
+    c.beginPath();
+    if (d.type === 'Galaxy') c.ellipse(q.x, q.y, 10, 5, -0.5, 0, 2 * Math.PI); else c.arc(q.x, q.y, 7, 0, 2 * Math.PI);
+    if (d.type === 'Nebula') c.setLineDash([2, 3]);
+    c.stroke(); c.setLineDash([]);
+    c.fillStyle = '#E3C88E'; c.font = '12px Jost, system-ui, sans-serif'; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(d.name, q.x + 12, q.y);
+    sv.drawn.push({ x: q.x, y: q.y, mag: d.mag - 2, o: d, v });
+    items.push({ v, mag: d.mag - 1, o: d });
+  });
+
+  // Planets, Moon, Sun
+  (sv.bodies || []).forEach(o => {
+    if (o.el < -0.02) return;
+    if (o.kind === 'planet' && o.mag > bortleLimit()) return;
+    const q = svProj(o.v);
+    if (!svOn(q, 30)) return;
+    const r = o.kind === 'planet' ? 5 : Math.max(9, 0.26 * D2R * ((sv.h / 2) / Math.tan(sv.vfov * D2R / 2)));
+    c.save(); c.shadowColor = o.color; c.shadowBlur = 14; c.fillStyle = o.color;
+    c.beginPath(); c.arc(q.x, q.y, r, 0, 2 * Math.PI); c.fill(); c.restore();
+    c.fillStyle = o.color; c.font = '500 14px Jost, system-ui, sans-serif'; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(o.kind === 'moon' ? 'Moon' : o.name, q.x + r + 6, q.y);
+    sv.drawn.push({ x: q.x, y: q.y, mag: -30, o, v: o.v });
+    items.push({ v: o.v, mag: o.mag - 3, o });
+  });
+
+  // Satellites (positions for the ones overhead are worked out every frame)
+  if (sats.length) {
+    const d = new Date(now), obs = observer(), sun = sunEci(d), gmst = satellite.gstime(d), dark = sunEl < -6;
+    const bL = bortleLimit();
+    for (const s of sats) {
+      if (s !== selected && s.now && s.now.el < SKIP_EL && now - s.checked < RECHECK) continue;
+      const p = look(s, d, obs);
+      s.checked = s.checked ? now : now - Math.random() * RECHECK;
+      s.now = p;
+      if (!p) continue;
+      p.lit = isSunlit(p.eci, sun); p.visible = p.lit && dark;
+      p.alt = Math.hypot(p.eci.x, p.eci.y, p.eci.z) - EARTH_R;
+      if (p.el < 0) continue;
+      p.mag = p.lit ? satMagAt(s.name, p.eci, gmst, sun, obs) : null;
+      if (s !== selected && (!inAltRange(p.alt) || (bL < Infinity && (p.mag == null || p.mag > bL)))) continue;
+      const v = enu(p.el, p.az), q = svProj(v);
+      if (!svOn(q, 10)) continue;
+      const isStation = /\bISS\b|ZARYA|TIANHE|CSS/i.test(s.name);
+      c.fillStyle = s === selected || isStation ? '#FFB45C' : s.starlink ? (p.visible ? '#7CC4FF' : '#3F86D1')
+                  : p.visible ? '#F4F7FA' : p.lit ? '#A9BCCF' : '#5A7592';
+      c.beginPath(); c.arc(q.x, q.y, isStation || s === selected ? 4.5 : 3, 0, 2 * Math.PI); c.fill();
+      if (isStation || s === selected || (p.visible && p.mag != null && p.mag < 2.5)) {
+        c.fillStyle = '#FFD9A8'; c.font = '12px Jost, system-ui, sans-serif'; c.textAlign = 'left'; c.textBaseline = 'middle';
+        c.fillText(s.name, q.x + 8, q.y);
+      }
+      sv.drawn.push({ x: q.x, y: q.y, mag: (p.mag == null ? 6 : p.mag) - 3, sat: s, v });
+      items.push({ v, mag: (p.mag == null ? 7 : p.mag) - 2, sat: s });
+    }
+  }
+
+  // Crosshair, and what's in the middle of it
+  c.strokeStyle = 'rgba(255,180,92,0.8)'; c.lineWidth = 1.5;
+  c.beginPath(); c.arc(W / 2, H / 2, 22, 0, 2 * Math.PI); c.stroke();
+  c.beginPath(); c.moveTo(W / 2 - 34, H / 2); c.lineTo(W / 2 - 26, H / 2); c.moveTo(W / 2 + 26, H / 2); c.lineTo(W / 2 + 34, H / 2);
+  c.moveTo(W / 2, H / 2 - 34); c.lineTo(W / 2, H / 2 - 26); c.moveTo(W / 2, H / 2 + 26); c.lineTo(W / 2, H / 2 + 34); c.stroke();
+  let best = null, bestScore = Infinity;
+  const lim2 = Math.max(4, sv.vfov / 12);
+  for (const it of items) {
+    const ang = Math.acos(Math.min(1, v3.dot(it.v, sv.f))) * R2D;
+    if (ang > lim2) continue;
+    const score = ang + it.mag * 0.4;
+    if (score < bestScore) { bestScore = score; best = it; }
+  }
+  sv.centre = best;
+
+  // Arrow to the chosen object when it's off screen
+  const tg = sv.target && svTargetVec(sv.target, now);
+  if (tg) {
+    const q = svProj(tg);
+    if (!svOn(q, -30)) {
+      let dx = v3.dot(tg, sv.r), dy = -v3.dot(tg, sv.u);
+      const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+      const R = Math.min(W, H) / 2 - 50, ax = W / 2 + dx * R, ay = H / 2 + dy * R;
+      c.save(); c.translate(ax, ay); c.rotate(Math.atan2(dy, dx));
+      c.fillStyle = '#FFB45C'; c.beginPath(); c.moveTo(16, 0); c.lineTo(-10, -10); c.lineTo(-10, 10); c.closePath(); c.fill();
+      c.restore();
+      c.fillStyle = '#FFD9A8'; c.font = '13px Jost, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(svName(sv.target), ax - dx * 30, ay - dy * 30);
+    } else if (q) {
+      c.strokeStyle = '#FFB45C'; c.lineWidth = 2; c.beginPath(); c.arc(q.x, q.y, 14, 0, 2 * Math.PI); c.stroke();
+    }
+  }
+  svCard(sv.target && (now - sv.tapT < 8000 || !best) ? sv.target : best);
+
+  // Status line
+  const view = enuToElAz(sv.f);
+  $('svStatus').textContent = (sv.manual ? 'Drag to look around · ' : sv.sensor ? '' : 'Waiting for motion sensors… ') +
+    'Looking ' + compass(view.az * R2D) + ', ' + Math.round(view.el * R2D) + '° up' +
+    (sv.noCompass ? ' · no compass' : '');
+  if (sv.sensor && !sv.manual && now - sv.lastOri > 3000) $('svStatus').textContent = 'Motion sensors stopped. Try closing and reopening.';
+}
+function enuToElAz(v) { return { el: Math.asin(Math.max(-1, Math.min(1, v[2]))), az: (Math.atan2(v[0], v[1]) + 2 * Math.PI) % (2 * Math.PI) }; }
+function svName(it) {
+  if (it.sat) return it.sat.name;
+  if (it.o) return it.o.kind === 'moon' ? 'The Moon' : it.o.name;
+  return STAR_NAMES[it.i] || 'A star';
+}
+function svTargetVec(it, now) {
+  if (it.sat) { const p = it.sat.now; return p ? enu(p.el, p.az) : null; }
+  if (it.o && (it.o.kind === 'planet' || it.o.kind === 'moon' || it.o.kind === 'sun')) {
+    const b = (sv.bodies || []).find(x => x.name === it.o.name); return b ? b.v : null;
+  }
+  if (it.o) { const d = (sv.dsoVec || []).find(x => x.d === it.o); return d ? d.v : null; }
+  return sv.starVec ? [sv.starVec[it.i * 4], sv.starVec[it.i * 4 + 1], sv.starVec[it.i * 4 + 2]] : null;
+}
+function svCard(it) {
+  const card = $('svCard');
+  if (!it) { card.classList.remove('has'); sv.cardIt = null; return; }
+  sv.cardIt = it;
+  let sub;
+  if (it.sat) {
+    const p = it.sat.now;
+    sub = 'Satellite' + (p && p.alt ? ', ' + Math.round(p.alt).toLocaleString() + ' km up' : '') +
+          (p && p.mag != null ? ', ' + magText(p.mag) : p && !p.lit ? ', in Earth’s shadow' : '');
+  } else if (it.o) {
+    const o = it.o;
+    sub = o.kind === 'planet' ? 'Planet, ' + magText(o.mag) : o.kind === 'moon' ? 'Moon, ' + Math.round(o.phase * 100) + '% lit'
+        : o.kind === 'sun' ? 'The Sun: never look straight at it' : o.type + ', ' + o.ly + ' light years away';
+  } else {
+    const mag = STARS[it.i * 4 + 2] / 100;
+    sub = 'Star, ' + magText(mag) + ', ' + brightnessWords(mag);
+  }
+  const name = svName(it);
+  if (card.dataset.t !== name + sub) { card.dataset.t = name + sub; $('svName').textContent = name; $('svSub').textContent = sub; }
+  card.classList.add('has');
+}
+
+// ---- opening, closing, camera, gestures ----
+async function svOpen() {
+  exitZoom();
+  sv.on = true; sv.tf = null; sv.started = false;
+  $('skyView').classList.add('on');
+  document.documentElement.classList.add('skyOn');
+  $('svStart').hidden = sv.sensor || sv.manual;
+  if (sv.sensor || sv.manual) svLoop();
+}
+function svClose() {
+  sv.on = false;
+  $('skyView').classList.remove('on');
+  document.documentElement.classList.remove('skyOn');
+  svCamera(false);
+}
+async function svStartSensors() {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') throw new Error('Motion access was refused');
+    }
+    window.addEventListener('deviceorientation', onOrientation);
+    sv.manual = false;
+    $('svStart').hidden = true;
+    $('svMode').textContent = '✋ Drag instead';
+    svLoop();
+    setTimeout(() => { if (!sv.sensor && sv.on) $('svStatus').textContent = 'No motion data. Use “Drag instead”, or open this in the iPhone app.'; }, 2500);
+  } catch (e) {
+    $('svStart').querySelector('.hint').textContent = 'Couldn’t use the motion sensors here (' + (e.message || e) +
+      '). Inside Google Apps Script they’re usually blocked; the iPhone app version has them. You can still drag to look around.';
+  }
+}
+function svStartManual() {
+  sv.manual = true; $('svStart').hidden = true; $('svMode').textContent = '🧭 Use motion';
+  svLoop();
+}
+let svLooping = false;
+function svLoop() {
+  if (svLooping) return;
+  svLooping = true;
+  const step = () => { if (!sv.on) { svLooping = false; return; } svFrame(); requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+async function svCamera(on) {
+  if (!on) {
+    if (sv.stream) sv.stream.getTracks().forEach(t => t.stop());
+    sv.stream = null; sv.cam = false;
+    $('skyView').classList.remove('cam'); $('svCam').textContent = '📷 Camera: off';
+    return;
+  }
+  try {
+    sv.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    $('svVideo').srcObject = sv.stream;
+    await $('svVideo').play().catch(() => {});
+    sv.cam = true; $('skyView').classList.add('cam'); $('svCam').textContent = '📷 Camera: on';
+  } catch (e) {
+    $('svStatus').textContent = 'Camera not available here (' + (e.message || e.name || e) + ').';
+  }
+}
+// Drag to look around (manual mode), pinch to zoom, tap to pick
+let svTouch = null;
+$('svCanvas').addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length === 2) {
+    const a = e.touches[0], b = e.touches[1];
+    svTouch = { pinch: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), fov: sv.vfov };
+  } else if (e.touches.length === 1) {
+    const t = e.touches[0];
+    svTouch = { x: t.clientX, y: t.clientY, sx: t.clientX, sy: t.clientY, moved: false };
+  }
+}, { passive: false });
+$('svCanvas').addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!svTouch) return;
+  if (svTouch.pinch && e.touches.length === 2) {
+    const a = e.touches[0], b = e.touches[1], dd = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    sv.vfov = Math.max(15, Math.min(110, svTouch.fov * svTouch.pinch / dd));
+  } else if (!svTouch.pinch && e.touches.length === 1) {
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - svTouch.sx, t.clientY - svTouch.sy) > 8) svTouch.moved = true;
+    if (sv.manual) svDrag(t.clientX - svTouch.x, t.clientY - svTouch.y);
+    svTouch.x = t.clientX; svTouch.y = t.clientY;
+  }
+}, { passive: false });
+$('svCanvas').addEventListener('touchend', e => {
+  if (svTouch && svTouch.pinch) { try { localStorage.setItem('skyFov', String(Math.round(sv.vfov))); } catch (er) {} }
+  if (svTouch && !svTouch.pinch && !svTouch.moved && e.touches.length === 0) svTap(svTouch.sx, svTouch.sy);
+  if (e.touches.length === 0) svTouch = null;
+});
+let svMouse = null;
+$('svCanvas').addEventListener('mousedown', e => { svMouse = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }; });
+window.addEventListener('mousemove', e => {
+  if (!svMouse || !sv.on) return;
+  if (sv.manual) svDrag(e.clientX - svMouse.x, e.clientY - svMouse.y);
+  svMouse.x = e.clientX; svMouse.y = e.clientY;
+});
+window.addEventListener('mouseup', e => {
+  if (svMouse && sv.on && Math.hypot(e.clientX - svMouse.sx, e.clientY - svMouse.sy) < 5) svTap(e.clientX, e.clientY);
+  svMouse = null;
+});
+$('svCanvas').addEventListener('wheel', e => {
+  e.preventDefault(); sv.vfov = Math.max(15, Math.min(110, sv.vfov * Math.exp(e.deltaY * 0.001)));
+}, { passive: false });
+function svDrag(dx, dy) {
+  const k = sv.vfov * D2R / sv.h;
+  sv.yaw -= dx * k; sv.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, sv.pitch + dy * k));
+}
+function svTap(x, y) {
+  let best = null, bs = Infinity;
+  for (const d of sv.drawn) {
+    const dist = Math.hypot(d.x - x, d.y - y);
+    if (dist > 32) continue;
+    const sc = dist + d.mag * 2;
+    if (sc < bs) { bs = sc; best = d; }
+  }
+  sv.target = best ? { sat: best.sat, o: best.o, i: best.i, v: best.v } : null;
+  sv.tapT = Date.now();
+}
+// "Details": leave sky view and open the full details for that object
+function svDetails() {
+  const it = sv.cardIt;
+  if (!it) return;
+  svClose();
+  if (it.sat) { setMode('sats'); select(it.sat); setTimeout(() => $('info').scrollIntoView({ behavior: 'smooth' }), 80); }
+  else {
+    setMode('stars');
+    selectStar(it.o ? (it.o.kind === 'planet' || it.o.kind === 'moon' || it.o.kind === 'sun' ? { kind: it.o.kind, name: it.o.name } : it.o) : starObj(it.i));
+    setTimeout(() => $('starInfo').scrollIntoView({ behavior: 'smooth' }), 80);
+  }
+}
+$('skyBtn').addEventListener('click', svOpen);
+$('svClose').addEventListener('click', svClose);
+$('svGo').addEventListener('click', svStartSensors);
+$('svDrag').addEventListener('click', svStartManual);
+$('svCam').addEventListener('click', () => svCamera(!sv.cam));
+$('svMore').addEventListener('click', svDetails);
+$('svMode').addEventListener('click', () => { if (sv.manual) svStartSensors(); else svStartManual(); });
+
+/* ---------- events ---------- */
+/* ---------- zoom ---------- */
+// Pinch (or + / mouse wheel) grows the dial about the point you're pinching.
+// The first zoom lifts the dial out of the page into a full-screen layer at
+// exactly the same size and place, so it then grows smoothly to fill the screen
+// and beyond. Zooming back out to normal size drops it back into the page.
+let gestureAt = 0;          // last pan/pinch time, so the click that follows is ignored
+function enterZoom() {
+  if (zoom.on) return;
+  const r = canvas.getBoundingClientRect();
+  zoom.base = baseRadius(r.width, r.height);
+  zoom.cx = r.left + r.width / 2; zoom.cy = r.top + r.height / 2; zoom.R = zoom.base;
+  zoom.on = true;
+  $('dialWrap').classList.add('zoomed');
+  document.documentElement.classList.add('zooming');
+  starNext = 0;
+}
+function exitZoom() {
+  if (!zoom.on) return;
+  zoom.on = false;
+  $('dialWrap').classList.remove('zoomed');
+  document.documentElement.classList.remove('zooming');
+  starNext = 0;
+}
+function clampZoom() {      // keep the middle of the screen inside the circle
+  const w = window.innerWidth, h = window.innerHeight;
+  const dx = w / 2 - zoom.cx, dy = h / 2 - zoom.cy, d = Math.hypot(dx, dy);
+  const lim = Math.max(zoom.R - 30, 0);
+  if (d > lim && d > 0) { zoom.cx = w / 2 - dx / d * lim; zoom.cy = h / 2 - dy / d * lim; }
+}
+function zoomBy(s, fx, fy) { // s = scale factor, (fx, fy) = screen point that stays put
+  if (!zoom.on) { if (s <= 1) return; enterZoom(); }
+  const max = zoom.base * 40;
+  if (zoom.R * s > max) s = max / zoom.R;
+  if (zoom.R * s < zoom.base * 0.97) { exitZoom(); return; }
+  zoom.cx = fx + (zoom.cx - fx) * s;
+  zoom.cy = fy + (zoom.cy - fy) * s;
+  zoom.R *= s;
+  clampZoom();
+  starNext = 0;
+}
+function panBy(dx, dy) { zoom.cx += dx; zoom.cy += dy; clampZoom(); starNext = 0; }
+function setZoomCap(title, sub) {
+  const el = $('zoomCap');
+  el.classList.toggle('has', !!title);
+  if (!title) { el.textContent = ''; el.dataset.t = ''; return; }
+  if (el.dataset.t === title + '|' + sub) return;
+  el.dataset.t = title + '|' + sub;
+  el.textContent = title;
+  const sm = document.createElement('small'); sm.textContent = sub; el.append(sm);
+}
+
+// Touch: two fingers pinch and move; one finger pans once zoomed; a tap selects
+let touch = null;
+const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2,
+                         d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) });
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length >= 2) {
+    e.preventDefault();
+    const m = mid(e.touches[0], e.touches[1]);
+    touch = { type: 'pinch', x: m.x, y: m.y, d: m.d };
+  } else if (e.touches.length === 1 && zoom.on) {
+    e.preventDefault();
+    const t = e.touches[0];
+    touch = { type: 'pan', x: t.clientX, y: t.clientY, sx: t.clientX, sy: t.clientY, moved: false };
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  if (!touch) return;
+  if (touch.type === 'pinch' && e.touches.length >= 2) {
+    e.preventDefault();
+    const m = mid(e.touches[0], e.touches[1]);
+    if (zoom.on) panBy(m.x - touch.x, m.y - touch.y);
+    if (touch.d > 0) zoomBy(m.d / touch.d, m.x, m.y);
+    touch.x = m.x; touch.y = m.y; touch.d = m.d;
+    gestureAt = Date.now();
+  } else if (touch.type === 'pan' && e.touches.length === 1) {
+    e.preventDefault();
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - touch.sx, t.clientY - touch.sy) > 8) touch.moved = true;
+    panBy(t.clientX - touch.x, t.clientY - touch.y);
+    touch.x = t.clientX; touch.y = t.clientY;
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  if (!touch) return;
+  if (touch.type === 'pan' && !touch.moved && e.touches.length === 0) handleTap(touch.sx, touch.sy);
+  if (touch.type === 'pinch' && e.touches.length === 1 && zoom.on) {   // lifted one finger: carry on panning
+    const t = e.touches[0];
+    touch = { type: 'pan', x: t.clientX, y: t.clientY, sx: t.clientX, sy: t.clientY, moved: true };
+    return;
+  }
+  if (e.touches.length === 0) { if (touch.type !== 'pan' || touch.moved) gestureAt = Date.now(); touch = null; }
+});
+canvas.addEventListener('touchcancel', () => { touch = null; });
+// Stop iPhone Safari zooming the whole page when pinching the dial
+['gesturestart', 'gesturechange'].forEach(ev =>
+  canvas.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+
+// Mouse and trackpad: ctrl+wheel / pinch on a trackpad zooms; plain wheel zooms once full screen
+canvas.addEventListener('wheel', e => {
+  if (!zoom.on && !e.ctrlKey) return;
+  e.preventDefault();
+  zoomBy(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX, e.clientY);
+}, { passive: false });
+let drag = null;
+canvas.addEventListener('mousedown', e => { if (zoom.on) drag = { x: e.clientX, y: e.clientY, moved: false }; });
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 2) drag.moved = true;
+  panBy(e.clientX - drag.x, e.clientY - drag.y);
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+window.addEventListener('mouseup', () => { if (drag && drag.moved) gestureAt = Date.now(); drag = null; });
+
+$('zoomIn').addEventListener('click', () => {
+  if (zoom.on) zoomBy(1.6, window.innerWidth / 2, window.innerHeight / 2);
+  else { const r = canvas.getBoundingClientRect(); zoomBy(1.6, r.left + r.width / 2, r.top + r.height / 2); }
+});
+$('zoomOut').addEventListener('click', () => zoomBy(1 / 1.6, window.innerWidth / 2, window.innerHeight / 2));
+$('zoomClose').addEventListener('click', exitZoom);
+$('zoomCap').addEventListener('click', () => {
+  exitZoom();
+  const panel = mode === 'stars' ? $('starInfo') : $('info');
+  setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') exitZoom(); });
+
+canvas.addEventListener('click', e => {
+  if (Date.now() - gestureAt < 350) return;     // the tail end of a pinch or drag, not a tap
+  handleTap(e.clientX, e.clientY);
+});
+function handleTap(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const x = clientX - r.left, y = clientY - r.top;
+  if (mode === 'stars') {
+    let best = null, bestScore = Infinity;
+    for (const d of starDrawn) {
+      const dist = Math.hypot(d.x - x, d.y - y);
+      if (dist > 22) continue;
+      const score = dist + d.mag * 2;          // prefer brighter things when several are close
+      if (score < bestScore) { best = d; bestScore = score; }
+    }
+    selectStar(best ? (best.o || starObj(best.i)) : null);
+    return;
+  }
+  let best = null, bestD = 24;
+  for (const d of drawn) {
+    const dist = Math.hypot(d.x - x, d.y - y);
+    if (dist < bestD) { best = d.s; bestD = dist; }
+  }
+  select(best);
+}
+$('list').addEventListener('click', e => {
+  const li = e.target.closest('li');
+  if (li) select(sats[Number(li.dataset.idx)] || null);
+});
+$('group').addEventListener('change', load);
+$('searchIn').addEventListener('input', () => {
+  const q = $('searchIn').value;
+  if (q.trim().length < 2) { showResults([]); return; }
+  const m = localMatches(q);
+  showResults(m, m.length ? '' : 'Press Search to look through every satellite.');
+});
+$('searchIn').addEventListener('keydown', e => { if (e.key === 'Escape') { $('searchIn').value = ''; showResults([]); } });
+$('searchForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = $('searchIn').value.trim();
+  if (q.length < 2) { showResults([], 'Type at least two letters, or a catalogue number.'); return; }
+  showResults([], 'Searching every satellite…');
+  google.script.run
+    .withSuccessHandler(text => {
+      const found = text ? parseTle(text) : [];
+      showResults(found, found.length ? (found.length >= 30 ? 'Showing the first 30 matches. Be more specific to narrow it down.' : '')
+                                      : 'No satellites found matching “' + q + '”.');
+    })
+    .withFailureHandler(err => showResults([], 'Search failed: ' + (err && err.message ? err.message : err)))
+    .searchSats(q);
+});
+$('reloadBtn').addEventListener('click', () => { if (showSL && $('group').value !== 'active') slSats = []; load(); });
+$('slBtn').addEventListener('click', () => {
+  showSL = !showSL;
+  try { localStorage.setItem('skySL', showSL ? '1' : '0'); } catch (e) {}
+  updateSlBtn();
+  if (needStarlink()) loadStarlink();
+  rebuild();
+});
+$('flipBtn').addEventListener('click', () => {
+  flip = -flip;
+  $('flipBtn').textContent = viewLabel();
+  starNext = 0;
+  try { localStorage.setItem('skyView', flip === 1 ? 'ground' : 'sky'); } catch (e) {}
+});
+$('locBtn').addEventListener('click', () => {
+  const f = $('locForm');
+  f.hidden = !f.hidden;
+  const l = loc || DEFAULT_LOC;
+  $('latIn').value = l.lat; $('lonIn').value = l.lon;
+  $('locMsg').textContent = '';
+});
+$('gpsBtn').addEventListener('click', () => {
+  $('locMsg').textContent = 'Finding your location…';
+  startLive(() => { $('locMsg').textContent = 'Location access isn’t available here. Type your latitude and longitude instead.'; });
+});
+$('locForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const lat = parseFloat($('latIn').value), lon = parseFloat($('lonIn').value);
+  if (!(lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) {
+    $('locMsg').textContent = 'Latitude must be between -90 and 90, longitude between -180 and 180.';
+    return;
+  }
+  stopLive();                       // a typed location switches live GPS off
+  saveLoc({ lat, lon, name: '' });
+  $('locForm').hidden = true;
+});
+
+$('tabSats').addEventListener('click', () => setMode('sats'));
+$('iMoreBtn').addEventListener('click', satMore);
+$('sMoreBtn').addEventListener('click', starMore);
+$('skySel').addEventListener('change', () => {
+  bortle = $('skySel').value;
+  try { localStorage.setItem('skyBortle', bortle); } catch (e) {}
+  showBortle();
+  starNext = 0; lastSlow = 0; rsCache.key = null;
+  if (selected) renderPasses(selected);
+});
+$('tabStars').addEventListener('click', () => setMode('stars'));
+$('tabSun').addEventListener('click', () => setMode('sun'));
+$('tabLtg').addEventListener('click', () => setMode('ltg'));
+$('fbBtn').addEventListener('click', flashBang);
+$('redBtn').addEventListener('click', () => {
+  redOn = !redOn;
+  try { localStorage.setItem('skyRed', redOn ? '1' : '0'); } catch (e) {}
+  applyRed();
+});
+$('linesBtn').addEventListener('click', () => {
+  showLines = !showLines;
+  try { localStorage.setItem('skyLines', showLines ? '1' : '0'); } catch (e) {}
+  $('linesBtn').textContent = 'Constellation lines: ' + (showLines ? 'on' : 'off');
+  $('linesBtn').setAttribute('aria-pressed', String(showLines));
+  starNext = 0;
+});
+$('starList').addEventListener('click', e => {
+  const li = e.target.closest('li');
+  if (li) selectStar(starListObjs[Number(li.dataset.n)] || null);
+});
+window.addEventListener('resize', () => { starNext = 0; });
+
+/* ---------- start ---------- */
+showWhere();
+updateSlBtn();
+initAlt();
+$('flipBtn').textContent = viewLabel();
+setMode(mode);
+applyRed();
+$('skySel').value = bortle;
+showBortle();
+$('linesBtn').textContent = 'Constellation lines: ' + (showLines ? 'on' : 'off');
+$('linesBtn').setAttribute('aria-pressed', String(showLines));
+if (!loc || loc.live) startLive();
+if (typeof satellite === 'undefined') {
+  setStatus('The orbit library didn’t load. Check your connection and refresh.');
+} else {
+  load();
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>

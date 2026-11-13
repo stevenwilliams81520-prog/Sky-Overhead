@@ -1,0 +1,20 @@
+{
+  "name": "sky-overhead",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sky Overhead: satellites, stars, sun & moon, tides and lightning, as an iPhone app",
+  "scripts": {
+    "build": "node build-www.js"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2",
+    "astronomy-engine": "2.1.19",
+    "leaflet": "1.9.4",
+    "satellite.js": "6.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2",
+    "@capacitor/assets": "4.0.0"
+  }
+}

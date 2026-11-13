@@ -1,0 +1,9 @@
+{
+  "appId": "com.stevenwilliams.skyoverhead",
+  "appName": "Sky Overhead",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0C1726"
+  }
+}

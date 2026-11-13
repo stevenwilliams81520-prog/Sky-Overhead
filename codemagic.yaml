@@ -1,0 +1,55 @@
+workflows:
+  sky-overhead-ios:
+    name: Sky Overhead iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    integrations:
+      app_store_connect: Berfau ASC          # the name of your App Store Connect API key in Codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.stevenwilliams.skyoverhead
+      vars:
+        APP_STORE_APPLE_ID: 6834593370      # your app's Apple ID number from App Store Connect
+      node: 22
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install and build the web app
+        script: |
+          npm install
+          node build-www.js
+      - name: Create / update the iOS project
+        script: |
+          if [ ! -d ios ]; then npx cap add ios; fi
+          npx @capacitor/assets generate --ios --iconBackgroundColor '#0C1726' --splashBackgroundColor '#0C1726'
+          npx cap sync ios
+      - name: Permissions and settings
+        script: |
+          PLIST=ios/App/App/Info.plist
+          setkey() { /usr/libexec/PlistBuddy -c "Set :$1 $3" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :$1 $2 $3" "$PLIST"; }
+          setkey NSCameraUsageDescription string "Sky view shows the stars and satellites over your camera picture."
+          setkey NSLocationWhenInUseUsageDescription string "Your location is used to work out what is in the sky above you, and for tides and lightning near you."
+          setkey NSMotionUsageDescription string "The motion sensors tell Sky view which way your phone is pointing."
+          setkey ITSAppUsesNonExemptEncryption bool false
+          setkey CFBundleDisplayName string "Sky Overhead"
+      - name: Signing
+        script: xcode-project use-profiles
+      - name: Build number
+        script: |
+          cd ios/App
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          agvtool new-version -all $((LATEST + 1))
+      - name: Build the app
+        script: |
+          if [ -d ios/App/App.xcworkspace ]; then
+            xcode-project build-ipa --workspace ios/App/App.xcworkspace --scheme App
+          else
+            xcode-project build-ipa --project ios/App/App.xcodeproj --scheme App
+          fi
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
