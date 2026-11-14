@@ -2221,10 +2221,25 @@ function onOrientation(e) {
   sv.sensor = true; sv.lastOri = Date.now();
   let alpha = e.alpha;
   if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-    // iPhone: alpha has an arbitrary zero, so learn the offset to true compass north
-    const k = (e.webkitCompassHeading + e.alpha) * D2R, w = sv.kOk ? 0.03 : 1;
-    sv.kx = sv.kx * (1 - w) + Math.cos(k) * w; sv.ky = sv.ky * (1 - w) + Math.sin(k) * w; sv.kOk = true;
-    alpha = e.alpha - Math.atan2(sv.ky, sv.kx) * R2D;
+    // iPhone: alpha has an arbitrary zero, so learn the offset to compass north. The iPhone's
+    // compass gives the direction the TOP EDGE of the phone points, which swings round 180°
+    // when you tilt the phone back past upright (e.g. aiming high in the north at Polaris).
+    // So compare it with the top edge's direction worked out the same way, which swings too,
+    // and the offset stays steady. Readings with the top edge nearly vertical are unreliable
+    // and skipped; any sudden disagreement has to last 3 seconds before it's believed.
+    const cB0 = Math.cos(e.beta * D2R), a0 = e.alpha * D2R;
+    if (Math.abs(cB0) > 0.1) {
+      const topAz = Math.atan2(-Math.sin(a0) * cB0, Math.cos(a0) * cB0) * R2D;
+      const k = (e.webkitCompassHeading - topAz) * D2R;
+      const cur = Math.atan2(sv.ky, sv.kx);
+      const diff = Math.abs(Math.atan2(Math.sin(k - cur), Math.cos(k - cur))) * R2D;
+      let w = 0;
+      if (!sv.kOk) w = 1;
+      else if (diff < 45) { w = 0.03 * Math.min(1, Math.abs(cB0) / 0.5); sv.kOddSince = 0; }
+      else { sv.kOddSince = sv.kOddSince || Date.now(); if (Date.now() - sv.kOddSince > 3000) { w = 1; sv.kOddSince = 0; } }
+      if (w) { sv.kx = sv.kx * (1 - w) + Math.cos(k) * w; sv.ky = sv.ky * (1 - w) + Math.sin(k) * w; sv.kOk = true; }
+    }
+    if (sv.kOk) alpha = e.alpha - Math.atan2(sv.ky, sv.kx) * R2D;
   } else if (!e.absolute) { sv.noCompass = true; }
   const a = alpha * D2R, b = e.beta * D2R, g = e.gamma * D2R;
   const cA = Math.cos(a), sA = Math.sin(a), cB = Math.cos(b), sB = Math.sin(b), cG = Math.cos(g), sG = Math.sin(g);
@@ -2505,7 +2520,7 @@ function svFrame() {
   const view = enuToElAz(sv.f);
   $('svStatus').textContent = (sv.manual ? 'Drag to look around · ' : sv.sensor ? '' : 'Waiting for motion sensors… ') +
     'Looking ' + compass(view.az * R2D) + ', ' + Math.round(view.el * R2D) + '° up' +
-    (sv.noCompass ? ' · no compass' : '');
+    (sv.noCompass ? ' · no compass' : sv.sensor && !sv.manual && !sv.kOk ? ' · tilt the phone a little to find north' : '');
   if (sv.sensor && !sv.manual && now - sv.lastOri > 3000) $('svStatus').textContent = 'Motion sensors stopped. Try closing and reopening.';
 }
 function enuToElAz(v) { return { el: Math.asin(Math.max(-1, Math.min(1, v[2]))), az: (Math.atan2(v[0], v[1]) + 2 * Math.PI) % (2 * Math.PI) }; }
