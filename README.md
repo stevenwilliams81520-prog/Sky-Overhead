@@ -18,5 +18,6 @@ phone at the sky). Standalone: everything runs on the phone, no Apps Script need
 
 ## Data sources
 Satellites: CelesTrak. Tides: Open-Meteo (Météo-France model). Lightning: EUMETSAT.
-Encyclopedia: Wikipedia (CC BY-SA). Place names and maps: © OpenStreetMap contributors.
+Encyclopedia: Wikipedia (CC BY-SA). Place names, maps and the towns used to estimate
+light pollution: © OpenStreetMap contributors (via Nominatim and the Overpass API).
 Star catalogue: HYG database via d3-celestial.

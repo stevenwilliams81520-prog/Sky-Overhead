@@ -281,6 +281,7 @@
     <button id="slBtn" class="satOnly" type="button" aria-pressed="false">Starlink: off</button>
     <button id="linesBtn" class="starOnly" type="button" aria-pressed="true">Constellation lines: on</button>
     <select id="skySel" aria-label="Your surroundings (Bortle dark-sky scale)">
+      <option value="auto">Your sky: estimate for my location</option>
       <option value="all">Your sky: show everything</option>
       <option value="1">Bortle 1: excellent dark-sky site</option>
       <option value="2">Bortle 2: truly dark site</option>
@@ -527,6 +528,7 @@ function saveLoc(l) {
   showWhere();
   if (selected) renderPasses(selected);
   starNext = 0; rsCache.key = null;
+  if (typeof refreshSkyEstimate === 'function') refreshSkyEstimate();
 }
 function showWhere() {
   const l = loc || DEFAULT_LOC;
@@ -1303,15 +1305,47 @@ const BORTLE = {
   '8':   { lim: 4.3, text: 'City. The sky is grey or orange and familiar constellations can look patchy.' },
   '9':   { lim: 3.8, text: 'City centre. Just the Moon, planets, bright satellites, the brightest stars and the Pleiades.' }
 };
-let bortle = 'all';
-try { const b = localStorage.getItem('skyBortle'); if (b && (b === 'all' || BORTLE[b])) bortle = b; } catch (e) {}
+// bortleSel is what's picked in the list; bortle is the class actually used.
+// "auto" estimates it from the towns around you (OpenStreetMap), refreshed as you move.
+let bortleSel = 'auto', bortle = 'all', skyEst = null, skyEstKey = '', skyEstBusy = false, skyEstErr = '';
+try { const b = localStorage.getItem('skyBortleSel'); if (b && (b === 'auto' || b === 'all' || BORTLE[b])) bortleSel = b; } catch (e) {}
+function applyBortle() {
+  bortle = bortleSel === 'auto' ? (skyEst ? skyEst.bortle : 'all') : bortleSel;
+  showBortle();
+  starNext = 0; lastSlow = 0;
+  if (typeof rsCache !== 'undefined') rsCache.key = null;
+  if (typeof selected !== 'undefined' && selected) renderPasses(selected);
+}
+function refreshSkyEstimate() {
+  if (bortleSel !== 'auto' || skyEstBusy) return;
+  const l = loc || DEFAULT_LOC;
+  const key = (Math.round(l.lat * 20) / 20) + ',' + (Math.round(l.lon * 20) / 20);   // about every 5 km
+  if (key === skyEstKey && (skyEst || skyEstErr)) return;
+  skyEstBusy = true; skyEstKey = key; skyEstErr = '';
+  showBortle();
+  google.script.run
+    .withSuccessHandler(t => { skyEstBusy = false; skyEst = JSON.parse(t); applyBortle(); })
+    .withFailureHandler(err => { skyEstBusy = false; skyEstErr = (err && err.message) || String(err); applyBortle(); })
+    .getSkyBrightness(l.lat, l.lon);
+}
 function bortleLimit() { return bortle === 'all' ? Infinity : BORTLE[bortle].lim; }
 function bortleNum() { return bortle === 'all' ? 0 : parseFloat(bortle); }
 function showBortle() {
   const el = $('bortleNote');
+  if (bortleSel === 'auto' && !skyEst) {
+    el.textContent = skyEstErr ? 'Couldn’t estimate your sky (' + skyEstErr + '), so everything is shown. Pick your surroundings from the list instead.'
+                               : 'Estimating how dark your sky is from the towns around you…';
+    return;
+  }
   if (bortle === 'all') { el.textContent = 'Showing everything. Pick your surroundings to see only what your sky lets you see.'; return; }
-  el.textContent = BORTLE[bortle].text + ' Faintest stars about magnitude ' + BORTLE[bortle].lim.toFixed(1) +
-    (BORTLE[bortle].lim > 6 ? ' (the app’s star list goes to magnitude 6, so every star is shown).' : '.');
+  let pre = '';
+  if (bortleSel === 'auto') {
+    const m = skyEst.main.length ? ', mostly from ' + skyEst.main.map(x => x.d < 2 ? x.name + ' itself' : x.name + ' (' + x.d + ' km)').join(' and ') : '';
+    pre = 'Estimated for your location: Bortle ' + bortle + ', sky brightness about ' + skyEst.sqm.toFixed(1) + ' mag/arcsec²' + m + '. ';
+  }
+  el.textContent = pre + BORTLE[bortle].text + ' Faintest stars about magnitude ' + BORTLE[bortle].lim.toFixed(1) +
+    (BORTLE[bortle].lim > 6 ? ' (the app’s star list goes to magnitude 6, so every star is shown).' : '.') +
+    (bortleSel === 'auto' ? ' Streetlights right beside you, haze or a bright Moon make it worse; if you know your sky, pick it from the list.' : '');
 }
 
 const DSOS = [
@@ -2978,11 +3012,10 @@ $('tabSats').addEventListener('click', () => setMode('sats'));
 $('iMoreBtn').addEventListener('click', satMore);
 $('sMoreBtn').addEventListener('click', starMore);
 $('skySel').addEventListener('change', () => {
-  bortle = $('skySel').value;
-  try { localStorage.setItem('skyBortle', bortle); } catch (e) {}
-  showBortle();
-  starNext = 0; lastSlow = 0; rsCache.key = null;
-  if (selected) renderPasses(selected);
+  bortleSel = $('skySel').value;
+  try { localStorage.setItem('skyBortleSel', bortleSel); } catch (e) {}
+  applyBortle();
+  refreshSkyEstimate();
 });
 $('tabStars').addEventListener('click', () => setMode('stars'));
 $('tabSun').addEventListener('click', () => setMode('sun'));
@@ -3013,8 +3046,10 @@ initAlt();
 $('flipBtn').textContent = viewLabel();
 setMode(mode);
 applyRed();
-$('skySel').value = bortle;
-showBortle();
+$('skySel').value = bortleSel;
+applyBortle();
+refreshSkyEstimate();
+setInterval(refreshSkyEstimate, 30000);   // picks up a new location (GPS or typed) within half a minute
 $('linesBtn').textContent = 'Constellation lines: ' + (showLines ? 'on' : 'off');
 $('linesBtn').setAttribute('aria-pressed', String(showLines));
 if (!loc || loc.live) startLive();

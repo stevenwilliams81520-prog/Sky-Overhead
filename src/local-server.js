@@ -342,7 +342,57 @@
     return null;
   }
 
-  const API = { getTles, searchSats, nearestPlace, getTides, getLightning, getWiki, getSatInfo };
+  // How light-polluted the sky is likely to be here, estimated from nearby towns (OpenStreetMap)
+  async function getSkyBrightness(lat, lon) {
+    lat = Number(lat); lon = Number(lon);
+    if (!isFinite(lat) || !isFinite(lon)) throw new Error('Bad coordinates');
+    const key = 'skyb_' + (Math.round(lat * 20) / 20) + '_' + (Math.round(lon * 20) / 20), hit = await cacheGet(key);
+    if (hit) return hit;
+    const res = await http('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(skyPlacesQuery_(lat, lon)));
+    if (res.status !== 200) throw new Error('Place data returned ' + res.status);
+    const out = JSON.stringify(estimateSky_(lat, lon, skyPlaces_(JSON.parse(res.text))));
+    await cachePut(key, out, 30 * 86400);              // towns don't move: keep for a month
+    return out;
+  }
+  // Estimate the night sky's brightness (and Bortle class) from the towns and cities around a point.
+  // Each place adds artificial light to the sky overhead: inside a town it's set by the town's size;
+  // further away it fades with distance to the power 2.5 (Walker's law). The total, compared with
+  // a natural dark sky of 22.0 mag/arcsec², gives the sky brightness a sky quality meter would read.
+  function estimateSky_(lat, lon, places) {
+    const contrib = [];
+    let R = 0;
+    for (const p of places) {
+      const d = Math.max(0.05, distKm_(lat, lon, p.lat, p.lon));
+      const dens = 3000 * Math.pow(Math.max(1, p.pop / 1e4), 0.15);   // people per km², higher in big cities
+      const rc = Math.sqrt(p.pop / dens / Math.PI);          // radius of the brightly lit core, km
+      const rin = 0.776 * Math.pow(p.pop, 0.266);            // artificial/natural sky ratio in the town centre
+      const r = rin / (1 + Math.pow(d / rc, 2.5));
+      if (r > 0.001) { R += r; contrib.push({ name: p.name, d: Math.round(d), r }); }
+    }
+    const sqm = 22.0 - 2.5 * Math.log10(1 + R);
+    const b = sqm >= 21.76 ? '1' : sqm >= 21.6 ? '2' : sqm >= 21.3 ? '3' : sqm >= 20.8 ? '4' : sqm >= 20.3 ? '4.5'
+            : sqm >= 19.25 ? '5' : sqm >= 18.5 ? '6' : sqm >= 18.0 ? '7' : sqm >= 17.5 ? '8' : '9';
+    contrib.sort((a, b2) => b2.r - a.r);
+    const main = contrib.filter(c => c.r >= Math.max(0.05, R * 0.12)).slice(0, 3).map(c => ({ name: c.name, d: c.d }));
+    return { sqm: Math.round(sqm * 100) / 100, bortle: b, main, places: places.length };
+  }
+  // Towns and cities within 200 km and villages within 15 km, from OpenStreetMap (Overpass API, free, no key)
+  function skyPlacesQuery_(lat, lon) {
+    const ll = lat.toFixed(3) + ',' + lon.toFixed(3);
+    return '[out:json][timeout:40];(node["place"~"^(city|town)$"](around:200000,' + ll + ');' +
+           'node["place"="village"](around:15000,' + ll + '););out;';
+  }
+  function skyPlaces_(json) {
+    const DEF = { city: 150000, town: 12000, village: 800 };
+    return (json.elements || []).map(e => {
+      const t = e.tags || {};
+      let pop = parseInt(String(t.population || '').replace(/[^\d]/g, ''), 10);
+      if (!(pop > 0)) pop = DEF[t.place] || 800;
+      return { name: t['name:en'] || t.name || '', lat: e.lat, lon: e.lon, pop: Math.min(pop, 2e7) };
+    }).filter(p => isFinite(p.lat) && isFinite(p.lon));
+  }
+
+  const API = { getTles, searchSats, nearestPlace, getTides, getLightning, getWiki, getSatInfo, getSkyBrightness };
   window.SKY_LOCAL = API;
 
   // Stand-in for Apps Script's google.script.run, so the page works unchanged
