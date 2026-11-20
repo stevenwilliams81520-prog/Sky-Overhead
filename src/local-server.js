@@ -136,41 +136,20 @@
     const R = 160, W = 240, H = 240;
     const dLat = R / 111.32, dLon = R / (111.32 * Math.cos(lat * Math.PI / 180));
     const box = [lon - dLon, lat - dLat, lon + dLon, lat + dLat];
-    const res = await http('https://view.eumetsat.int/geoserver/mtg_fd/wms?service=WMS&version=1.1.0&request=GetMap' +
-      '&layers=mtg_fd:li_afa&styles=&srs=EPSG:4326&bbox=' + box.map(v => v.toFixed(4)).join(',') +
-      '&width=' + W + '&height=' + H + '&format=image/gif&transparent=true', { binary: true });
-    const type = res.headers['content-type'] || '';
-    if (res.status !== 200 || type.indexOf('image/gif') === -1) throw new Error('Lightning service returned ' + res.status);
-    const img = decodeGif_(res.bytes);
-    const lit = i => img.idx[i] >= 0 && img.idx[i] !== img.transp;
-    const seen = new Uint8Array(W * H), blobs = [];
-    let litCount = 0;
-    for (let i = 0; i < W * H; i++) {
-      if (!lit(i)) continue;
-      litCount++;
-      if (seen[i]) continue;
-      const stack = [i]; seen[i] = 1;
-      let n = 0, sx = 0, sy = 0, best = Infinity;
-      while (stack.length) {
-        const j = stack.pop(), x = j % W, y = (j - x) / W;
-        n++; sx += x; sy += y;
-        const plat = box[3] - (y + 0.5) / H * (box[3] - box[1]), plon = box[0] + (x + 0.5) / W * (box[2] - box[0]);
-        const d = distKm_(lat, lon, plat, plon);
-        if (d < best) best = d;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx, ny = y + dy, k = ny * W + nx;
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H || seen[k] || !lit(k)) continue;
-          seen[k] = 1; stack.push(k);
-        }
-      }
-      const cx = sx / n, cy = sy / n;
-      const clat = box[3] - (cy + 0.5) / H * (box[3] - box[1]), clon = box[0] + (cx + 0.5) / W * (box[2] - box[0]);
-      blobs.push({ lat: +clat.toFixed(4), lon: +clon.toFixed(4), near: +best.toFixed(1),
-                   brg: Math.round(bearing_(lat, lon, clat, clon)), px: n, km2: Math.round(n * (2 * R / W) * (2 * R / H)) });
+    // Use the layer that worked last time first; fall back to the next if the service doesn't have it
+    const known = await cacheGet('ltg_layer');
+    const order = LTG_LAYERS_.slice().sort((x, y) => (y.name === known) - (x.name === known));
+    let out = null, lastErr = '';
+    for (const L of order) {
+      const res = await http(ltgUrl_(L.name, box, W, H), { binary: true });
+      const type = res.headers['content-type'] || '';
+      if (res.status !== 200 || type.indexOf('image/gif') === -1) { lastErr = 'Lightning service returned ' + res.status; continue; }
+      out = JSON.stringify({ t: Date.now(), radius: R, layer: L.name, centres: L.centres,
+                             blobs: ltgBlobs_(decodeGif_(res.bytes), lat, lon, box, W, H, R, L.reach) });
+      await cachePut('ltg_layer', L.name, 86400);
+      break;
     }
-    if (litCount > W * H * 0.5) throw new Error('The lightning map came back without transparency, so it can’t be read');
-    blobs.sort((a, b) => a.near - b.near);
-    const out = JSON.stringify({ t: Date.now(), radius: R, blobs: blobs.filter(b => b.near <= R).slice(0, 40) });
+    if (!out) throw new Error(lastErr);
     await cachePut(key, out, 120);
     return out;
   }
@@ -244,6 +223,47 @@
   }
 
   // ---- shared helpers (same code as the Apps Script version) ----
+  // Lightning layers to try, sharpest first. "li_af" (Accumulated Flashes) marks just the centre of
+  // each flash; "li_afa" (Accumulated Flash Area) spreads each flash over the whole patch of cloud it lit.
+  const LTG_LAYERS_ = [{ name: 'mtg_fd:li_af', reach: 3, centres: true }, { name: 'mtg_fd:li_afa', reach: 1, centres: false }];
+  function ltgUrl_(layer, box, W, H) {
+    return 'https://view.eumetsat.int/geoserver/mtg_fd/wms?service=WMS&version=1.1.0&request=GetMap' +
+           '&layers=' + layer + '&styles=&srs=EPSG:4326&bbox=' + box.map(v => v.toFixed(4)).join(',') +
+           '&width=' + W + '&height=' + H + '&format=image/gif&transparent=true';
+  }
+  // Group lit pixels into storms. With flash centres, dots within `reach` pixels (~4 km) count as
+  // one storm; each storm's nearest dot gives the distance, its centre the direction.
+  function ltgBlobs_(img, lat, lon, box, W, H, R, reach) {
+    const lit = i => img.idx[i] >= 0 && img.idx[i] !== img.transp;
+    const seen = new Uint8Array(W * H), blobs = [];
+    let litCount = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (!lit(i)) continue;
+      litCount++;
+      if (seen[i]) continue;
+      const stack = [i]; seen[i] = 1;
+      let n = 0, sx = 0, sy = 0, best = Infinity;
+      while (stack.length) {
+        const j = stack.pop(), x = j % W, y = (j - x) / W;
+        n++; sx += x; sy += y;
+        const plat = box[3] - (y + 0.5) / H * (box[3] - box[1]), plon = box[0] + (x + 0.5) / W * (box[2] - box[0]);
+        const d = distKm_(lat, lon, plat, plon);
+        if (d < best) best = d;
+        for (let dy = -reach; dy <= reach; dy++) for (let dx = -reach; dx <= reach; dx++) {
+          const nx = x + dx, ny = y + dy, k = ny * W + nx;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H || seen[k] || !lit(k)) continue;
+          seen[k] = 1; stack.push(k);
+        }
+      }
+      const cx = sx / n, cy = sy / n;
+      const clat = box[3] - (cy + 0.5) / H * (box[3] - box[1]), clon = box[0] + (cx + 0.5) / W * (box[2] - box[0]);
+      blobs.push({ lat: +clat.toFixed(4), lon: +clon.toFixed(4), near: +best.toFixed(1),
+                   brg: Math.round(bearing_(lat, lon, clat, clon)), px: n, km2: Math.round(n * (2 * R / W) * (2 * R / H)) });
+    }
+    if (litCount > W * H * 0.5) throw new Error('The lightning map came back without transparency, so it can’t be read');
+    blobs.sort((a, b) => a.near - b.near);
+    return blobs.filter(b => b.near <= R).slice(0, 40);
+  }
   function distKm_(la1, lo1, la2, lo2) {
     const r = Math.PI / 180, dLa = (la2 - la1) * r, dLo = (lo2 - lo1) * r;
     const h = Math.sin(dLa / 2) ** 2 + Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin(dLo / 2) ** 2;
@@ -411,4 +431,14 @@
     return r;
   }
   window.google = { script: { get run() { return run(); } } };
+
+  // Links that open in a new window (LightningMaps, Wikipedia…) open in an in-app browser
+  // panel on the iPhone, with a Done button that comes straight back to the app
+  document.addEventListener('click', e => {
+    const a = e.target.closest && e.target.closest('a[target="_blank"]');
+    const B = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser;
+    if (!a || !B || !/^https?:/i.test(a.href)) return;
+    e.preventDefault();
+    B.open({ url: a.href, presentationStyle: 'popover' });
+  }, true);
 })();

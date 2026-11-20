@@ -261,6 +261,14 @@
   <p class="hint satOnly">The centre is straight above you and the gold ring is the horizon. Glowing dots are sunlit satellites against a dark sky, the ones you could spot by eye. Blue dots are Starlink. Tap a dot to follow it. Pinch the dial, or tap +, to zoom in.</p>
   <p class="hint starOnly">Bigger dots are brighter stars. Planets and the Moon are labelled, and gold rings mark galaxies, nebulas and star clusters you can see without a telescope. Tap anything for details. Pinch the dial, or tap +, to zoom in; more star names appear as you go.</p>
   <p id="skyNote" class="hint starOnly"></p>
+  <section id="meteorCard" class="card starOnly" aria-live="off">
+    <h2>Meteors (shooting stars)</h2>
+    <p id="mtNow" class="big"></p>
+    <p id="mtWhen" class="hint"></p>
+    <ul id="mtList" class="evList"></ul>
+    <p id="mtNext"></p>
+    <p class="hint">A forecast, not a live count: it’s worked out from the International Meteor Organization’s shower calendar, where each shower’s radiant (the point its meteors seem to come from) is in your sky, how dark your sky is, and the Moon. Assumes a clear sky. Look about halfway up, a little away from the radiant, and give your eyes 20 minutes to adjust.</p>
+  </section>
 
   <div class="controls">
     <select id="group" class="satOnly" aria-label="Satellite group">
@@ -354,7 +362,7 @@
       <p id="ltgWhen" class="hint"></p>
       <div id="ltgMap"></div>
       <ul id="ltgList" class="evList"></ul>
-      <p class="hint">Gold rings are 10, 25, 50, 100 and 150 km from you. Coloured patches are where the Meteosat weather satellite saw lightning in the last 5 minutes; dots mark each patch’s centre, older ones fade over half an hour. Positions are roughly ±5–10 km, and the data runs a few minutes behind real time. Thunder delays assume sound travels 343 m a second.</p>
+      <p class="hint">Gold rings are 10, 25, 50, 100 and 150 km from you. Coloured spots are where the Meteosat weather satellite saw lightning flashes in the last 5 minutes; dots mark each storm’s centre, older ones fade over half an hour. Positions are the centre of each flash as seen from space, good to a few kilometres, and run a few minutes behind (if the satellite’s flash-centre layer isn’t available, the wider area each flash lit up is shown instead, which is less precise). Thunder delays assume sound travels 343 m a second.</p>
       <p class="hint">Lightning data: EUMETSAT, MTG Lightning Imager.</p>
     </div>
     <div class="card">
@@ -1021,28 +1029,174 @@ function updateInfo(s, dark) {
     : m != null && m <= 6.5 ? 'Only somewhere really dark; it’s faint'
     : 'Not by eye; it’s too faint';
 }
+
+/* ====================================================================
+   MAPS: Apple Maps (MapKit JS) when a token is set, otherwise OpenStreetMap
+   (Leaflet). Both maps in the app (satellite track, lightning) draw through
+   this small layer, so they work the same either way. If Apple turns the
+   token down, the maps quietly switch back to OpenStreetMap.
+   ==================================================================== */
+const SkyMap = (function () {
+  let state = (window.SKY_MAPKIT_TOKEN || '').trim() ? 'loading' : 'off';   // off | loading | ready | failed
+  const made = [], onFail = [];
+  if (state === 'loading') {
+    window.skyMapkitReady = function () {
+      try {
+        mapkit.init({ authorizationCallback: done => done(window.SKY_MAPKIT_TOKEN.trim()), language: 'en-GB' });
+        mapkit.addEventListener('error', e => { console.warn('Apple Maps:', e && e.status); fail(); });
+        state = 'ready';
+      } catch (e) { fail(); }
+    };
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.core.js';
+    sc.crossOrigin = 'anonymous';
+    sc.dataset.libraries = 'map,annotations,overlays';
+    sc.dataset.callback = 'skyMapkitReady';
+    sc.onerror = fail;
+    document.head.appendChild(sc);
+    setTimeout(() => { if (state === 'loading') fail(); }, 10000);
+  }
+  function fail() {
+    if (state === 'failed') return;
+    state = 'failed';
+    made.splice(0).forEach(m => { try { m.destroy(); } catch (e) {} });
+    onFail.forEach(f => f());
+  }
+  const D = Math.PI / 180;
+
+  // ---------- OpenStreetMap (Leaflet) ----------
+  function leaflet(el, o) {
+    const m = L.map(el, { worldCopyJump: true, minZoom: o.minZoom, maxZoom: o.maxZoom, scrollWheelZoom: false,
+                          dragging: !L.Browser.mobile }).setView([20, 0], 2);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: o.maxZoom,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(m);
+    m.createPane('top').style.zIndex = 450;                 // above the darkened tiles
+    const st = s => ({ color: s.color, weight: s.weight || 1, opacity: s.opacity == null ? 1 : s.opacity,
+                       dashArray: s.dash ? s.dash.join(' ') : null, fill: !!s.fill, fillColor: s.fill,
+                       fillOpacity: s.fill ? (s.fillOpacity == null ? 1 : s.fillOpacity) : 0, interactive: false });
+    function group() {
+      const g = L.layerGroup().addTo(m);
+      return {
+        clear: () => g.clearLayers(),
+        circle: (la, lo, r, s) => { const c = L.circle([la, lo], Object.assign({ radius: r }, st(s))).addTo(g);
+                                    return { set: (a, b, rr) => { c.setLatLng([a, b]); if (rr != null) c.setRadius(rr); } }; },
+        dot: (la, lo, px, s, tip) => { const c = L.circleMarker([la, lo], Object.assign(st(s), { radius: px, interactive: !!tip })).addTo(g);
+                                       if (tip) c.bindTooltip(tip); return { set: (a, b) => c.setLatLng([a, b]) }; },
+        line: (pts, s) => L.polyline(pts, st(s)).addTo(g),
+        label: (la, lo, text) => L.marker([la, lo], { interactive: false,
+                   icon: L.divIcon({ className: 'ringLbl', html: text, iconSize: null }) }).addTo(g)
+      };
+    }
+    return {
+      kind: 'osm', group,
+      view: (la, lo, km) => m.fitBounds(L.latLng(la, lo).toBounds(km * 2000), { animate: false }),
+      zoomOut: (la, lo) => m.setView([la, lo], 2, { animate: false }),
+      pan: (la, lo) => m.panTo([la, lo], { animate: true, duration: 0.8 }),
+      wms: (url, params, opacity) => { const w = L.tileLayer.wms(url, Object.assign({ format: 'image/png', transparent: true,
+                                         version: '1.1.1', opacity, pane: 'top' }, params)).addTo(m);
+                                       return { set: p => w.setParams(p) }; },
+      onUserMove: f => m.on('dragstart', f),
+      resize: () => m.invalidateSize(),
+      destroy: () => m.remove()
+    };
+  }
+
+  // ---------- Apple Maps (MapKit JS) ----------
+  function apple(el, o) {
+    const m = new mapkit.Map(el, { colorScheme: mapkit.Map.ColorSchemes.Dark, showsPointsOfInterest: false,
+                                   isRotationEnabled: false, showsCompass: mapkit.FeatureVisibility.Hidden,
+                                   showsMapTypeControl: false });
+    const C = (la, lo) => new mapkit.Coordinate(la, lo);
+    const style = s => new mapkit.Style({ strokeColor: s.color, strokeOpacity: s.opacity == null ? 1 : s.opacity,
+                                          lineWidth: s.weight || 1, lineDash: s.dash || [], fillColor: s.fill || null,
+                                          fillOpacity: s.fill ? (s.fillOpacity == null ? 1 : s.fillOpacity) : 0 });
+    function group() {
+      let ov = [], an = [];
+      const el2 = (css, text) => () => { const d = document.createElement('div'); d.style.cssText = css; if (text) d.textContent = text; return d; };
+      return {
+        clear: () => { if (ov.length) m.removeOverlays(ov); if (an.length) m.removeAnnotations(an); ov = []; an = []; },
+        circle: (la, lo, r, s) => { const c = new mapkit.CircleOverlay(C(la, lo), r, { style: style(s) }); m.addOverlay(c); ov.push(c);
+                                    return { set: (a, b, rr) => { c.coordinate = C(a, b); if (rr != null) c.radius = rr; } }; },
+        dot: (la, lo, px, s, tip) => {
+          const css = 'width:' + 2 * px + 'px;height:' + 2 * px + 'px;border-radius:50%;box-sizing:border-box;' +
+                      'border:' + (s.weight || 1) + 'px solid ' + s.color + ';background:' + (s.fill || 'transparent') +
+                      ';opacity:' + (s.opacity == null ? 1 : s.opacity);
+          const a = new mapkit.Annotation(C(la, lo), el2(css), { anchorOffset: new DOMPoint(0, px), title: tip || '',
+                                          calloutEnabled: !!tip, enabled: !!tip });
+          m.addAnnotation(a); an.push(a);
+          return { set: (x, y) => { a.coordinate = C(x, y); } };
+        },
+        line: (pts, s) => { const p = new mapkit.PolylineOverlay(pts.map(q => C(q[0], q[1])), { style: style(s) }); m.addOverlay(p); ov.push(p); },
+        label: (la, lo, text) => { const a = new mapkit.Annotation(C(la, lo),
+                     el2('color:#C8A55E;font:11px Jost,system-ui,sans-serif;white-space:nowrap;text-shadow:0 0 3px #000', text),
+                     { anchorOffset: new DOMPoint(0, 6), enabled: false });
+                   m.addAnnotation(a); an.push(a); }
+      };
+    }
+    // GeoServer WMS tiles in the map's Web Mercator projection
+    function wms(url, params, opacity) {
+      const t = new mapkit.TileOverlay((x, y, z, scale, data) => {
+        const W = 20037508.342789244, size = 2 * W / Math.pow(2, z);
+        const bbox = [-W + x * size, W - (y + 1) * size, -W + (x + 1) * size, W - y * size].join(',');
+        const px = 256 * (scale || 1);
+        return url + '?service=WMS&request=GetMap&version=1.1.1&styles=&format=image/png&transparent=true&srs=EPSG:3857' +
+               '&width=' + px + '&height=' + px + '&bbox=' + bbox +
+               Object.keys(data).map(k => '&' + k + '=' + encodeURIComponent(data[k])).join('');
+      }, { opacity });
+      t.data = Object.assign({}, params);
+      m.addTileOverlay(t);
+      return { set: p => { t.data = Object.assign({}, t.data, p); t.reload(); } };
+    }
+    const region = (la, lo, km) => new mapkit.CoordinateRegion(C(la, lo),
+      new mapkit.CoordinateSpan(Math.min(170, km * 2 / 111.32), Math.min(350, km * 2 / (111.32 * Math.max(0.1, Math.cos(la * D))))));
+    return {
+      kind: 'apple', group, wms,
+      view: (la, lo, km) => { m.region = region(la, lo, km); },
+      zoomOut: (la, lo) => { m.region = region(la, lo, 6000); },
+      pan: (la, lo) => m.setCenterAnimated(C(la, lo), true),
+      onUserMove: f => m.addEventListener('scroll-start', f),
+      resize: () => {},
+      destroy: () => m.destroy()
+    };
+  }
+
+  return {
+    // Returns null while Apple Maps is still loading (try again shortly)
+    create(el, o) {
+      if (state === 'loading') return null;
+      if (state === 'ready') { try { const a = apple(el, o); made.push(a); return a; } catch (e) { fail(); } }
+      if (typeof L === 'undefined') return null;
+      el.textContent = '';
+      return leaflet(el, o);
+    },
+    onFallback: f => onFail.push(f),
+    get kind() { return state === 'ready' ? 'apple' : 'osm'; }
+  };
+})();
+
+// If Apple Maps turns the token down, rebuild both maps on OpenStreetMap
+SkyMap.onFallback(() => {
+  map = null; mapLayers = null; trackFor.id = null;
+  ltgMap = null; ltgLayers = null;
+  ['map', 'ltgMap'].forEach(id => { $(id).textContent = ''; $(id).className = ''; });
+});
 /* ---------- ground map ---------- */
 let map = null, mapLayers = null, mapFollow = true, trackFor = { id: null, t: 0 };
 function ensureMap() {
   if (map) return true;
-  if (typeof L === 'undefined') { $('map').textContent = 'The map couldn’t load. Check your connection.'; return false; }
-  map = L.map('map', {
-    worldCopyJump: true, minZoom: 1, maxZoom: 9, scrollWheelZoom: false,
-    dragging: !L.Browser.mobile          // on phones, one-finger drags scroll the page instead
-  }).setView([20, 0], 2);
-  // Standard OpenStreetMap tiles: free and keyless (CARTO now watermarks keyless tiles).
-  // They're light by default, so CSS on .leaflet-tile-pane darkens them to match the app.
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 9,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-  }).addTo(map);
+  if (typeof L === 'undefined' && SkyMap.kind !== 'apple' && !window.SKY_MAPKIT_TOKEN) {
+    $('map').textContent = 'The map couldn’t load. Check your connection.'; return false;
+  }
+  map = SkyMap.create($('map'), { minZoom: 1, maxZoom: 9 });
+  if (!map) return false;                                   // Apple Maps still loading
+  const top = map.group();
   mapLayers = {
-    track: L.layerGroup().addTo(map),
-    foot: L.circle([0, 0], { radius: 1, color: '#C8A55E', weight: 1, fillColor: '#C8A55E', fillOpacity: 0.08 }).addTo(map),
-    me: L.circleMarker([0, 0], { radius: 4, color: '#C8A55E', weight: 2, fillColor: '#0C1726', fillOpacity: 1 }).addTo(map),
-    sat: L.circleMarker([0, 0], { radius: 6, color: '#FFB45C', weight: 2, fillColor: '#FFB45C', fillOpacity: 1 }).addTo(map)
+    track: map.group(),
+    foot: top.circle(0, 0, 1, { color: '#C8A55E', weight: 1, fill: '#C8A55E', fillOpacity: 0.08 }),
+    me: top.dot(0, 0, 4, { color: '#C8A55E', weight: 2, fill: '#0C1726' }),
+    sat: top.dot(0, 0, 6, { color: '#FFB45C', weight: 2, fill: '#FFB45C' })
   };
-  map.on('dragstart', () => { mapFollow = false; });
+  map.onUserMove(() => { mapFollow = false; });
   return true;
 }
 function subPoint(rec, date) {
@@ -1071,25 +1225,23 @@ function drawTrack(s, now) {
     const p = subPoint(s.rec, new Date(now + m * 60000)); if (p) future.push(p);
   }
   if (nowPt) { past.push(nowPt); future.unshift(nowPt); }
-  mapLayers.track.clearLayers();
-  splitAtDateLine(past).forEach(seg =>
-    L.polyline(seg, { color: '#8197AD', weight: 2, opacity: 0.7 }).addTo(mapLayers.track));
-  splitAtDateLine(future).forEach(seg =>
-    L.polyline(seg, { color: '#FFB45C', weight: 2, dashArray: '5 6' }).addTo(mapLayers.track));
+  mapLayers.track.clear();
+  splitAtDateLine(past).forEach(seg => mapLayers.track.line(seg, { color: '#8197AD', weight: 2, opacity: 0.7 }));
+  splitAtDateLine(future).forEach(seg => mapLayers.track.line(seg, { color: '#FFB45C', weight: 2, dash: [5, 6] }));
 }
 function updateMap(s, glat, glon, h) {
   if (!ensureMap()) return;
   const now = Date.now();
   const isNew = trackFor.id !== s.id;
   if (isNew || now - trackFor.t > 60000) { drawTrack(s, now); trackFor = { id: s.id, t: now }; }
-  mapLayers.sat.setLatLng([glat, glon]);
+  mapLayers.sat.set(glat, glon);
   // Footprint: everywhere on Earth from which the satellite is above the horizon
   const lam = Math.acos(EARTH_R / (EARTH_R + Math.max(h, 1)));
-  mapLayers.foot.setLatLng([glat, glon]).setRadius(EARTH_R * lam * 1000);
+  mapLayers.foot.set(glat, glon, EARTH_R * lam * 1000);
   const l = loc || DEFAULT_LOC;
-  mapLayers.me.setLatLng([l.lat, l.lon]);
-  if (isNew) map.setView([glat, glon], 2, { animate: false });
-  else if (mapFollow) map.panTo([glat, glon], { animate: true, duration: 0.8 });
+  mapLayers.me.set(l.lat, l.lon);
+  if (isNew) map.zoomOut(glat, glon);
+  else if (mapFollow) map.pan(glat, glon);
 }
 
 // Asks the server for the nearest town under the satellite: straight away for a
@@ -1272,7 +1424,7 @@ function select(s) {
   mapFollow = true; trackFor.id = null;
   updateInfo(s, false);
   renderPasses(s);
-  if (map) map.invalidateSize();
+  if (map) map.resize();
   lastSlow = 0;
 }
 
@@ -1311,6 +1463,7 @@ let bortleSel = 'auto', bortle = 'all', skyEst = null, skyEstKey = '', skyEstBus
 try { const b = localStorage.getItem('skyBortleSel'); if (b && (b === 'auto' || b === 'all' || BORTLE[b])) bortleSel = b; } catch (e) {}
 function applyBortle() {
   bortle = bortleSel === 'auto' ? (skyEst ? skyEst.bortle : 'all') : bortleSel;
+  if (typeof meteorNext !== 'undefined') meteorNext = 0;
   showBortle();
   starNext = 0; lastSlow = 0;
   if (typeof rsCache !== 'undefined') rsCache.key = null;
@@ -1533,12 +1686,144 @@ function starFrame(force) {
       (sp.el >= 0 ? Math.round(sp.el * R2D) + '° up, ' + compass(sp.az * R2D) : 'Below the horizon') + '. Tap for details');
   } else setZoomCap('', '');
   renderSkyNote(sunEl, time, aobs);
+  renderMeteors(false);
   renderStarList(listCands);
 }
 
 function posOf(o, lst, lat) {
   if (o.kind === 'planet' || o.kind === 'moon' || o.kind === 'sun') return bodyNow[o.name];
   return altAz(o.ra, o.dec, lst, lat);
+}
+
+
+/* ---------- meteors: what you can expect to see, from the IMO shower calendar ---------- */
+// peak / s / e: solar longitude (J2000, degrees) of the peak and the start and end of activity.
+// zhr: the rate a perfect observer would see at the peak with the radiant overhead in a dark sky.
+// b (and bf after the peak): how quickly the rate falls away from the peak, in powers of ten per degree.
+// r: population index (how many more meteors appear for each extra magnitude of sky darkness).
+// ra/dec: radiant at the peak; dra/ddec: how it drifts per degree of solar longitude.
+const SHOWERS = [
+  { name: 'Quadrantids', con: 'Boötes', s: 276.5, e: 291.5, peak: 283.15, zhr: 80, r: 2.1, b: 1.5, ra: 230, dec: 49 },
+  { name: 'Lyrids', con: 'Lyra', s: 24.0, e: 39.7, peak: 32.32, zhr: 18, r: 2.1, b: 0.22, ra: 271, dec: 34, dra: 1.1 },
+  { name: 'Eta Aquariids', con: 'Aquarius', s: 29.0, e: 67.0, peak: 45.5, zhr: 50, r: 2.4, b: 0.08, ra: 338, dec: -1, dra: 0.9, ddec: 0.4 },
+  { name: 'Alpha Capricornids', con: 'Capricornus', s: 101, e: 142, peak: 127, zhr: 5, r: 2.5, b: 0.1, ra: 307, dec: -10, dra: 0.54, ddec: 0.25 },
+  { name: 'Southern Delta Aquariids', con: 'Aquarius', s: 109.5, e: 150, peak: 127, zhr: 25, r: 2.5, b: 0.09, ra: 340, dec: -16, dra: 0.8, ddec: 0.18 },
+  { name: 'Perseids', con: 'Perseus', s: 114.5, e: 151, peak: 140.0, zhr: 100, r: 2.2, b: 0.2, bf: 0.4, ra: 48, dec: 58, dra: 1.3, ddec: 0.2 },
+  { name: 'Draconids', con: 'Draco', s: 192.5, e: 196.5, peak: 195.4, zhr: 10, r: 2.6, b: 1.0, ra: 262, dec: 54 },
+  { name: 'Orionids', con: 'Orion', s: 188.5, e: 225, peak: 208, zhr: 20, r: 2.5, b: 0.12, ra: 95, dec: 16, dra: 0.7, ddec: 0.1 },
+  { name: 'Southern Taurids', con: 'Taurus', s: 167, e: 238, peak: 197, zhr: 5, r: 2.3, b: 0.03, ra: 32, dec: 9, dra: 0.8, ddec: 0.3 },
+  { name: 'Northern Taurids', con: 'Taurus', s: 206, e: 258, peak: 230, zhr: 5, r: 2.3, b: 0.03, ra: 58, dec: 22, dra: 0.76, ddec: 0.12 },
+  { name: 'Leonids', con: 'Leo', s: 223.5, e: 248, peak: 235.27, zhr: 15, r: 2.5, b: 0.3, ra: 152, dec: 22, dra: 0.7, ddec: -0.4 },
+  { name: 'Geminids', con: 'Gemini', s: 251.5, e: 268, peak: 262.2, zhr: 150, r: 2.6, b: 0.39, bf: 0.81, ra: 112, dec: 33, dra: 1.0, ddec: -0.15 },
+  { name: 'Ursids', con: 'Ursa Minor', s: 265, e: 274.5, peak: 270.7, zhr: 10, r: 3.0, b: 0.6, ra: 217, dec: 76 }
+];
+const wrap180 = x => ((x % 360) + 540) % 360 - 180;
+function solarLon2000(date) {               // the Sun's ecliptic longitude, J2000, degrees
+  const t = Astronomy.MakeTime(date);
+  return (Astronomy.SunPosition(t).elon - 0.013969 * (date.getUTCFullYear() - 2000) + 360) % 360;
+}
+function showerZhr(sh, lam) {
+  const d = wrap180(lam - sh.peak);
+  if (wrap180(lam - sh.s) < 0 || wrap180(sh.e - lam) < 0) return 0;
+  return sh.zhr * Math.pow(10, -(d > 0 && sh.bf ? sh.bf : sh.b) * Math.abs(d));
+}
+// The faintest star you'd see: your sky (Bortle), twilight and moonlight
+function meteorLimit(sunEl, moon) {
+  let lm = bortle === 'all' ? 6.5 : Math.min(7.0, bortleLimit());
+  if (sunEl > -18) lm -= (sunEl + 18) * 0.35;
+  if (moon && moon.el > 0) lm -= 1.6 * moon.phase * Math.sqrt(Math.sin(moon.el));
+  return lm;
+}
+// Expected meteors per hour at a moment, for a clear sky
+function meteorRates(date) {
+  const l = loc || DEFAULT_LOC, lat = l.lat * D2R;
+  const lst = satellite.gstime(date) + l.lon * D2R;
+  const t = Astronomy.MakeTime(date), aobs = new Astronomy.Observer(l.lat, l.lon, 0);
+  const hz = body => { const eq = Astronomy.Equator(body, t, aobs, true, true);
+                       return Astronomy.Horizon(t, aobs, eq.ra, eq.dec, 'normal'); };
+  const sunEl = hz('Sun').altitude;
+  const mh = hz('Moon'), moon = { el: mh.altitude * D2R, phase: Astronomy.Illumination('Moon', t).phase_fraction };
+  const lam = solarLon2000(date), lm = meteorLimit(sunEl, moon);
+  const out = { sunEl, lm, moon, lam, showers: [], total: 0 };
+  if (sunEl > -12) return out;                                   // too light to see meteors
+  for (const sh of SHOWERS) {
+    const z = showerZhr(sh, lam);
+    if (z <= 0) continue;
+    const d = wrap180(lam - sh.peak);
+    const p = altAz(sh.ra + (sh.dra || 0) * d, sh.dec + (sh.ddec || 0) * d, lst, lat);
+    const hr = p.el > 0 ? z * Math.sin(p.el) * Math.pow(sh.r, lm - 6.5) : 0;
+    out.showers.push({ sh, zhr: z, hr, el: p.el, az: p.az, d });
+    out.total += hr;
+  }
+  // Random (sporadic) meteors: about 2 an hour in the evening rising to 10 before dawn, as Earth turns into its path
+  const solarHour = ((date.getUTCHours() + date.getUTCMinutes() / 60 + l.lon / 15) % 24 + 24) % 24;
+  const sp = (6 + 4 * Math.cos(2 * Math.PI * (solarHour - 6) / 24)) * Math.pow(3.0, lm - 6.5);
+  out.sporadic = sp; out.total += sp;
+  return out;
+}
+function rateText(x) { return x < 0.5 ? 'less than 1' : x < 1.5 ? 'about 1' : 'about ' + Math.round(x); }
+let meteorNext = 0;
+function renderMeteors(force) {
+  if (typeof Astronomy === 'undefined') return;
+  const now = Date.now();
+  if (!force && now < meteorNext) return;
+  meteorNext = now + 60000;
+  const r = meteorRates(new Date(now));
+  // Best time in the next 24 hours
+  let best = null;
+  for (let m = 0; m <= 24 * 60; m += 20) {
+    const x = meteorRates(new Date(now + m * 60000));
+    if (x.sunEl <= -12 && (!best || x.total > best.total)) best = Object.assign(x, { t: now + m * 60000 });
+  }
+  if (r.sunEl > -12) $('mtNow').textContent = r.sunEl > 0 ? 'Daytime: no meteors to see yet.' : 'Still too light for meteors.';
+  else $('mtNow').textContent = rateText(r.total) + ' an hour right now, if the sky is clear';
+  $('mtWhen').textContent = best
+    ? (best.t - now < 30 * 60000 && r.sunEl <= -12 ? 'This is about as good as it gets in the next day.'
+       : 'Best in the next day: around ' + clock(best.t) + (best.t - now > 12 * 3600e3 ? ' tomorrow' : '') +
+         ', ' + rateText(best.total) + ' an hour.')
+    : '';
+  const ul = $('mtList'); ul.textContent = '';
+  const src = r.sunEl <= -12 ? r : (best || r);
+  const rows = src.showers.filter(x => x.zhr >= 0.5).sort((a, b) => b.hr - a.hr);
+  rows.forEach(x => {
+    const li = document.createElement('li');
+    const left = document.createElement('span');
+    left.textContent = x.sh.name;
+    const when = document.createElement('span'); when.className = 'when';
+    const days = Math.round(x.d / 0.9856);
+    when.textContent = 'Radiant in ' + x.sh.con + (x.el > 0 ? ', ' + Math.round(x.el * R2D) + '° up ' + compass(x.az * R2D) : ', below the horizon') +
+      (Math.abs(days) <= 1 ? ' · at its peak' : days < 0 ? ' · peaks in ' + -days + ' days' : ' · peaked ' + days + ' days ago');
+    left.append(' ', when);
+    const cd = document.createElement('span'); cd.className = 'cd';
+    cd.textContent = (r.sunEl <= -12 ? '' : 'later: ') + rateText(x.hr) + '/h';
+    li.append(left, ' ', cd); ul.append(li);
+  });
+  if (src.sporadic != null) {
+    const li = document.createElement('li');
+    const left = document.createElement('span'); left.textContent = 'Random (sporadic) meteors';
+    const when = document.createElement('span'); when.className = 'when'; when.textContent = 'From any direction; more before dawn';
+    left.append(' ', when);
+    const cd = document.createElement('span'); cd.className = 'cd'; cd.textContent = (r.sunEl <= -12 ? '' : 'later: ') + rateText(src.sporadic) + '/h';
+    li.append(left, ' ', cd); ul.append(li);
+  }
+  // Next big shower (ZHR 15+) that hasn't peaked yet
+  let next = null;
+  const lam = solarLon2000(new Date(now)), yr = new Date(now).getUTCFullYear();
+  for (const sh of SHOWERS.filter(x => x.zhr >= 15)) {
+    const ahead = (sh.peak - lam + 360) % 360;
+    if (ahead < 0.5) continue;
+    if (!next || ahead < next.ahead) next = { sh, ahead };
+  }
+  if (next) {
+    let t = null;
+    try { t = Astronomy.SearchSunLongitude((next.sh.peak + 0.013969 * (yr - 2000)) % 360, Astronomy.MakeTime(new Date(now)), 370); } catch (e) {}
+    const when = t ? t.date : new Date(now + next.ahead / 0.9856 * 86400000);
+    const days = Math.round((when - now) / 86400000);
+    const here = next.sh.zhr * Math.sin(55 * D2R) * Math.pow(next.sh.r, (bortle === 'all' ? 6.5 : Math.min(7.0, bortleLimit())) - 6.5);
+    $('mtNext').textContent = 'Next big shower: the ' + next.sh.name + ', peaking around ' +
+      when.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' (in ' + days + ' days). Up to ' +
+      next.sh.zhr + ' an hour at a perfect dark site; from your sky, ' + rateText(here) + ' an hour at best, depending on the Moon.';
+  } else $('mtNext').textContent = '';
 }
 
 function renderSkyNote(sunEl, time, aobs) {
@@ -1789,7 +2074,7 @@ function setMode(m) {
   $('tabLtg').setAttribute('aria-selected', String(m === 'ltg'));
   try { localStorage.setItem('skyMode', m); } catch (e) {}
   if (m === 'sun' || m === 'ltg') exitZoom();
-  if (m === 'ltg' && ltgMap) setTimeout(() => ltgMap.invalidateSize(), 50);
+  if (m === 'ltg' && ltgMap) setTimeout(() => ltgMap.resize(), 50);
   starNext = 0; lastSlow = 0; sunNext = 0;
 }
 
@@ -2077,32 +2362,24 @@ function thunderText(km) {
        : 'thunder would take ' + t + ', but it’s too far to hear';
 }
 function ensureLtgMap() {
-  if (ltgMap || typeof L === 'undefined') return;
-  ltgMap = L.map('ltgMap', { scrollWheelZoom: false, dragging: !L.Browser.mobile, minZoom: 4, maxZoom: 11 });
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 11, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-  }).addTo(ltgMap);
-  ltgMap.createPane('ltgPane').style.zIndex = 450;          // outside the darkened tile layer
-  const wms = L.tileLayer.wms('https://view.eumetsat.int/geoserver/mtg_fd/wms', {
-    layers: 'mtg_fd:li_afa', format: 'image/png', transparent: true, version: '1.1.1',
-    opacity: 0.9, pane: 'ltgPane', attribution: 'Lightning &copy; EUMETSAT'
-  }).addTo(ltgMap);
-  ltgLayers = { wms, rings: L.layerGroup().addTo(ltgMap), marks: L.layerGroup().addTo(ltgMap), key: '' };
+  if (ltgMap) return;
+  ltgMap = SkyMap.create($('ltgMap'), { minZoom: 4, maxZoom: 11 });
+  if (!ltgMap) return;                                      // Apple Maps still loading
+  const wms = ltgMap.wms('https://view.eumetsat.int/geoserver/mtg_fd/wms',
+                         { layers: (ltg.data && ltg.data.layer) || 'mtg_fd:li_af' }, 0.9);
+  ltgLayers = { wms, rings: ltgMap.group(), marks: ltgMap.group(), key: '' };
 }
 function drawLtgRings(l) {
   const key = l.lat.toFixed(3) + ',' + l.lon.toFixed(3);
   if (ltgLayers.key === key) return;
   ltgLayers.key = key;
-  ltgLayers.rings.clearLayers();
+  ltgLayers.rings.clear();
   [10, 25, 50, 100, 150].forEach(km => {
-    L.circle([l.lat, l.lon], { radius: km * 1000, color: '#C8A55E', weight: 1, dashArray: '4 6', fill: false, interactive: false })
-      .addTo(ltgLayers.rings);
-    L.marker([l.lat + km / 111.32, l.lon], { interactive: false,
-      icon: L.divIcon({ className: 'ringLbl', html: km + ' km', iconSize: null }) }).addTo(ltgLayers.rings);
+    ltgLayers.rings.circle(l.lat, l.lon, km * 1000, { color: '#C8A55E', weight: 1, dash: [4, 6] });
+    ltgLayers.rings.label(l.lat + km / 111.32, l.lon, km + ' km');
   });
-  L.circleMarker([l.lat, l.lon], { radius: 5, color: '#C8A55E', weight: 2, fillColor: '#0C1726', fillOpacity: 1 })
-    .bindTooltip('You').addTo(ltgLayers.rings);
-  ltgMap.fitBounds(L.latLng(l.lat, l.lon).toBounds(300000));
+  ltgLayers.rings.dot(l.lat, l.lon, 5, { color: '#C8A55E', weight: 2, fill: '#0C1726' }, 'You');
+  ltgMap.view(l.lat, l.lon, 150);
 }
 function loadLightning() {
   const l = loc || DEFAULT_LOC;
@@ -2115,7 +2392,8 @@ function loadLightning() {
       if (ltg.key !== key) ltg.hist = [];
       ltg.hist = ltg.hist.filter(h => data.t - h.t < 30 * 60000 && h.t !== data.t).concat({ t: data.t, blobs: data.blobs });
       ltg = Object.assign(ltg, { key, t: Date.now(), data, loading: false, err: '' });
-      if (ltgLayers) ltgLayers.wms.setParams({ _t: Math.floor(Date.now() / 120000) });   // fetch the newest map image
+      // show the same layer the distances came from, and fetch the newest map image
+      if (ltgLayers) ltgLayers.wms.set({ layers: data.layer || 'mtg_fd:li_afa', _t: Math.floor(Date.now() / 120000) });
       renderLightning();
     })
     .withFailureHandler(err => {
@@ -2128,13 +2406,12 @@ function renderLightning() {
   const ul = $('ltgList');
   ul.textContent = '';
   if (ltgLayers) {
-    ltgLayers.marks.clearLayers();
+    ltgLayers.marks.clear();
     ltg.hist.forEach(h => {
       const age = (Date.now() - h.t) / 60000, op = Math.max(0.15, 1 - age / 30);
-      h.blobs.forEach(b => L.circleMarker([b.lat, b.lon], {
-        radius: Math.min(9, 3 + Math.sqrt(b.px)), color: '#FFE45C', weight: 1.5, opacity: op,
-        fillColor: '#FFB45C', fillOpacity: op * 0.6
-      }).bindTooltip(b.near.toFixed(0) + ' km ' + compass(b.brg) + (age >= 1 ? ', ' + Math.round(age) + ' min ago' : '')).addTo(ltgLayers.marks));
+      h.blobs.forEach(b => ltgLayers.marks.dot(b.lat, b.lon, Math.min(9, 3 + Math.sqrt(b.px)),
+        { color: '#FFE45C', weight: 1.5, opacity: op, fill: 'rgba(255,180,92,' + (op * 0.6).toFixed(2) + ')' },
+        b.near.toFixed(0) + ' km ' + compass(b.brg) + (age >= 1 ? ', ' + Math.round(age) + ' min ago' : '')));
     });
   }
   if (ltg.err && !ltg.data) {
@@ -2156,7 +2433,9 @@ function renderLightning() {
     const left = document.createElement('span');
     left.textContent = x.near.toFixed(0) + ' km ' + compass(x.brg);
     const when = document.createElement('span'); when.className = 'when';
-    when.textContent = 'Storm patch about ' + x.km2 + ' km²';
+    when.textContent = ltg.data.centres
+      ? x.px + (x.px === 1 ? ' flash spot' : ' flash spots') + ' in the last 5 minutes'
+      : 'Storm patch about ' + x.km2 + ' km²';
     left.append(' ', when);
     const cd = document.createElement('span'); cd.className = 'cd';
     cd.textContent = 'Thunder ' + Math.round(Math.max(x.near, 1) / SOUND_KMS) + ' s';

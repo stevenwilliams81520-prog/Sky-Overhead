@@ -9,6 +9,7 @@ phone at the sky). Standalone: everything runs on the phone, no Apps Script need
 
 ## Files
 - `src/Index.html`, `src/StarData.html` – the app's page and star catalogue
+- `src/map-config.js` – your Apple Maps (MapKit JS) token; empty = OpenStreetMap
 - `src/local-server.js` – fetches the data on the phone (CelesTrak, Open-Meteo,
   EUMETSAT, Wikipedia, OpenStreetMap) and keeps it for a while
 - `build-www.js` – puts the page, data code and libraries into the `www` folder
@@ -18,6 +19,8 @@ phone at the sky). Standalone: everything runs on the phone, no Apps Script need
 
 ## Data sources
 Satellites: CelesTrak. Tides: Open-Meteo (Météo-France model). Lightning: EUMETSAT.
+Meteor showers: International Meteor Organization shower calendar.
+Maps: Apple Maps (MapKit JS) when a token is set in src/map-config.js, otherwise OpenStreetMap.
 Encyclopedia: Wikipedia (CC BY-SA). Place names, maps and the towns used to estimate
 light pollution: © OpenStreetMap contributors (via Nominatim and the Overpass API).
 Star catalogue: HYG database via d3-celestial.

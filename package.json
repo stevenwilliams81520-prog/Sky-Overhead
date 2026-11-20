@@ -11,7 +11,8 @@
     "@capacitor/ios": "8.6.2",
     "astronomy-engine": "2.1.19",
     "leaflet": "1.9.4",
-    "satellite.js": "6.0.2"
+    "satellite.js": "6.0.2",
+    "@capacitor/browser": "8.0.5"
   },
   "devDependencies": {
     "@capacitor/cli": "8.6.2",

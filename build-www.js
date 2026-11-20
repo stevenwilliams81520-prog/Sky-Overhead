@@ -17,6 +17,7 @@ const libs = {
 for (const [name, from] of Object.entries(libs)) fs.copyFileSync(path.join(__dirname, from), path.join(out, 'lib', name));
 fs.cpSync(path.join(__dirname, 'node_modules/leaflet/dist/images'), path.join(out, 'lib', 'images'), { recursive: true });
 fs.copyFileSync(path.join(__dirname, 'src', 'local-server.js'), path.join(out, 'local-server.js'));
+fs.copyFileSync(path.join(__dirname, 'src', 'map-config.js'), path.join(out, 'map-config.js'));
 
 let html = src('Index.html');
 const swap = (re, to) => { if (!re.test(html)) throw new Error('Could not find ' + re); html = html.replace(re, to); };
@@ -30,7 +31,7 @@ swap(/<\?!= include\('StarData'\); \?>/, src('StarData.html'));
 // otherwise iPhone shows the page at desktop width (really zoomed out)
 const viewport = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n' +
                  '<meta name="theme-color" content="#0C1726">\n';
-const shim = viewport + '<script src="local-server.js"></script>';
+const shim = viewport + '<script src="map-config.js"></script>\n<script src="local-server.js"></script>';
 swap(/<base target="_top">/, shim);
 fs.writeFileSync(path.join(out, 'index.html'), html);
 console.log('www built:', Math.round(html.length / 1024) + ' KB index.html');
