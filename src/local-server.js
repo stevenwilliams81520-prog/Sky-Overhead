@@ -234,21 +234,43 @@
       if (r.status !== 200) throw new Error((src === 'usgs' ? 'USGS' : 'EMSC') + ' returned ' + r.status);
       return quakeParse_(r.text, src);
     };
-    const lists = await Promise.all([get(quakeUrlEmsc_(lat, lon, start, minmag, 3, 2000), 'emsc'),
-                                     get(quakeUrlEmsc_(lat, lon, start, Math.max(minmag, 2.5), 9, 2000), 'emsc')]);
-    if (!lists[0].length && !lists[1].length) lists.push(await get(quakeUrlEmsc_(lat, lon, start, Math.max(minmag, 4), 180, 2000), 'emsc'));
+    let errs = 0, lastErr = '';
+    const tryGet = (url, src) => get(url, src).catch(e => { errs++; lastErr = e.message; return []; });
+    const lists = await Promise.all([tryGet(quakeUrlEmsc_(lat, lon, start, minmag, 3, 2000), 'emsc'),
+                                     tryGet(quakeUrlEmsc_(lat, lon, start, Math.max(minmag, 2.5), 9, 2000), 'emsc')]);
+    if (!lists[0].length && !lists[1].length) lists.push(await tryGet(quakeUrlEmsc_(lat, lon, start, Math.max(minmag, 4), 180, 1000), 'emsc'));
+    if (errs === lists.length) throw new Error(lastErr);
     let world = null;
     try { world = (await get(quakeUrlUsgsBiggest_(start, minmag), 'usgs'))[0] || null; } catch (e) {}
     const out = JSON.stringify(Object.assign(quakeSummary_(lat, lon, lists), { world, t: Date.now() }));
-    await cachePut(key, out, 300);
+    await cachePut(key, out, 120);
+    return out;
+  }
+
+  // The latest (or strongest) 40 earthquakes worldwide since start; kept for 2 minutes
+  async function getQuakeFeed(start, minmag, order) {
+    minmag = Number(minmag) || 0; start = String(start); order = order === 'strongest' ? 'strongest' : 'latest';
+    if (!/^\d{4}-\d\d-\d\dT/.test(start)) throw new Error('Bad request');
+    const key = 'eqf_' + start.slice(0, 13) + '_' + minmag + '_' + order, hit = await cacheGet(key);
+    if (hit) return hit;
+    const r = await http(quakeUrlWorld_(start, minmag, order));
+    if (r.status !== 200 && r.status !== 204) throw new Error('EMSC returned ' + r.status);
+    const out = JSON.stringify({ t: Date.now(), order, list: r.status === 204 ? [] : quakeParse_(r.text, 'emsc') });
+    await cachePut(key, out, 120);
     return out;
   }
 
   // ---- shared helpers (same code as the Apps Script version) ----
+  function quakeUrlWorld_(start, minmag, order) {
+    return 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&nodata=204&limit=40' +
+      '&orderby=' + (order === 'strongest' ? 'magnitude' : 'time') +
+      '&start=' + encodeURIComponent(start) + (minmag > 0 ? '&minmag=' + minmag : '');
+  }
   // ---- earthquakes: shared helpers (EMSC SeismicPortal, CC BY 4.0; USGS, public domain) ----
   function quakeUrlEmsc_(lat, lon, start, minmag, maxradiusDeg, limit) {
-    return 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&nodata=204&orderby=time' +
-      '&lat=' + lat.toFixed(3) + '&lon=' + lon.toFixed(3) + '&maxradius=' + maxradiusDeg +
+    // The whole world is asked for without a centre point: EMSC rejects a 180° radius search
+    const where = maxradiusDeg >= 180 ? '' : '&lat=' + lat.toFixed(3) + '&lon=' + lon.toFixed(3) + '&maxradius=' + maxradiusDeg;
+    return 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&nodata=204&orderby=time' + where +
       '&start=' + encodeURIComponent(start) + (minmag > 0 ? '&minmag=' + minmag : '') + '&limit=' + limit;
   }
   function quakeUrlUsgsBiggest_(start, minmag) {
@@ -475,7 +497,7 @@
     }).filter(p => isFinite(p.lat) && isFinite(p.lon));
   }
 
-  const API = { getTles, searchSats, nearestPlace, getTides, getLightning, getWiki, getSatInfo, getSkyBrightness, getQuakes };
+  const API = { getTles, searchSats, nearestPlace, getTides, getLightning, getWiki, getSatInfo, getSkyBrightness, getQuakes, getQuakeFeed };
   window.SKY_LOCAL = API;
 
   // Stand-in for Apps Script's google.script.run, so the page works unchanged
