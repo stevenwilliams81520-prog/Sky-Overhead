@@ -151,7 +151,7 @@
   #tideChart svg { display: block; width: 100%; height: auto; margin-top: 8px; }
   /* sky view: point the phone at the sky */
   #skyBtn { border-color: var(--brass); color: var(--brass); }
-  body[data-mode="sun"] #skyBtn, body[data-mode="ltg"] #skyBtn { display: none; }
+  body[data-mode="sun"] #skyBtn, body[data-mode="ltg"] #skyBtn, body[data-mode="eq"] #skyBtn { display: none; }
   #skyView { position: fixed; inset: 0; z-index: 9100; background: #04060C; display: none; overflow: hidden;
     touch-action: none; -webkit-user-select: none; user-select: none; }
   #skyView.on { display: block; }
@@ -199,6 +199,19 @@
   body[data-mode="ltg"] #dialWrap, body[data-mode="ltg"] #flipBtn, body[data-mode="ltg"] #skySel,
   body[data-mode="ltg"] #bortleNote, body:not([data-mode="ltg"]) .ltgOnly { display: none !important; }
   #ltgMap { height: 340px; border-radius: 8px; margin-top: 8px; background: #0F1F36; }
+  body[data-mode="eq"] .satOnly, body[data-mode="eq"] .starOnly, body[data-mode="eq"] .sunOnly, body[data-mode="eq"] .ltgOnly,
+  body[data-mode="eq"] #dialWrap, body[data-mode="eq"] #flipBtn, body[data-mode="eq"] #skySel,
+  body[data-mode="eq"] #bortleNote, body:not([data-mode="eq"]) .eqOnly { display: none !important; }
+  #eqMap { height: 340px; border-radius: 8px; margin-top: 8px; background: #0F1F36; }
+  #eqMap .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9) saturate(0.6); }
+  .eqPick { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+  .eqPick select { flex: 1 1 140px; }
+  .eqBig { display: flex; gap: 14px; align-items: center; }
+  .eqMag { flex: 0 0 auto; width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 1.35rem; font-weight: 500; color: #0C1726; }
+  .eqBig .what { flex: 1; min-width: 0; }
+  .eqBig .what .big { margin: 0 0 2px; }
+  .eqBig a { color: var(--brass); }
   #ltgMap .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9) saturate(0.6); }
   .ringLbl { color: #C8A55E; font-size: 11px; white-space: nowrap; text-shadow: 0 0 3px #000; }
   .bigBtn { width: 100%; padding: 16px; font-size: 1.15rem; border-radius: 12px; margin-top: 8px;
@@ -237,6 +250,7 @@
       <button id="tabStars" role="tab" type="button" aria-selected="false">Stars</button>
       <button id="tabSun" role="tab" type="button" aria-selected="false">Sun &amp; Moon</button>
       <button id="tabLtg" role="tab" type="button" aria-selected="false">Lightning</button>
+      <button id="tabEq" role="tab" type="button" aria-selected="false">Quakes</button>
     </div>
     <button id="redBtn" type="button" aria-pressed="false">Red light: off</button>
   </div>
@@ -353,6 +367,37 @@
       <span class="key" style="border-top:2px solid #8197AD"></span>where it’s been.
       The gold circle is the area that can see it right now, and the small ring is you.
     </p>
+  </section>
+
+  <section id="eqTab" class="eqOnly">
+    <div class="eqPick">
+      <select id="eqPeriod" aria-label="Time period">
+        <option value="day">Last 24 hours</option>
+        <option value="week" selected>Last week</option>
+        <option value="month">Last month</option>
+        <option value="year">This year</option>
+      </select>
+      <select id="eqMin" aria-label="Minimum strength">
+        <option value="0">Any strength</option>
+        <option value="2">Magnitude 2+ (sometimes felt)</option>
+        <option value="3">Magnitude 3+ (often felt)</option>
+        <option value="4">Magnitude 4+ (felt widely)</option>
+        <option value="5">Magnitude 5+ (can cause damage)</option>
+        <option value="6">Magnitude 6+ (strong)</option>
+        <option value="7">Magnitude 7+ (major)</option>
+      </select>
+    </div>
+    <div class="card"><h2>Nearest earthquake</h2><div id="eqNearest" class="eqBig"><p class="big">Looking for earthquakes…</p></div></div>
+    <div class="card"><h2>Strongest near you</h2><p class="hint" style="margin-top:0">Within 1,000 km</p><div id="eqStrong" class="eqBig"></div></div>
+    <div class="card"><h2>Strongest in the world</h2><div id="eqWorld" class="eqBig"></div></div>
+    <div class="card">
+      <h2>Map</h2>
+      <div id="eqMap"></div>
+      <ul id="eqList" class="evList"></ul>
+      <p id="eqWhen" class="hint"></p>
+      <p class="hint">Circles are sized by strength; brighter ones are more recent. Magnitude is a log scale: each whole number is about 32 times more energy. Below magnitude 2 is rarely felt; the UK has a few hundred small quakes a year, mostly under 2. “Felt within” is a rough guide to how far away people usually notice a quake that size.</p>
+      <p class="hint">Earthquake data: EMSC-CSEM SeismicPortal (CC BY 4.0, includes the British Geological Survey) and the USGS. Early reports can be revised within hours.</p>
+    </div>
   </section>
 
   <section id="ltgTab" class="ltgOnly">
@@ -1178,7 +1223,8 @@ const SkyMap = (function () {
 SkyMap.onFallback(() => {
   map = null; mapLayers = null; trackFor.id = null;
   ltgMap = null; ltgLayers = null;
-  ['map', 'ltgMap'].forEach(id => { $(id).textContent = ''; $(id).className = ''; });
+  if (typeof eqMap !== 'undefined') { eqMap = null; eqLayers = null; }
+  ['map', 'ltgMap', 'eqMap'].forEach(id => { $(id).textContent = ''; $(id).className = ''; });
 });
 /* ---------- ground map ---------- */
 let map = null, mapLayers = null, mapFollow = true, trackFor = { id: null, t: 0 };
@@ -1435,7 +1481,7 @@ function select(s) {
    slowly) or immediately after a tap, flip or location change.
    ==================================================================== */
 let mode = 'sats';
-try { const m = localStorage.getItem('skyMode'); if (m === 'stars' || m === 'sun' || m === 'ltg') mode = m; } catch (e) {}
+try { const m = localStorage.getItem('skyMode'); if (m === 'stars' || m === 'sun' || m === 'ltg' || m === 'eq') mode = m; } catch (e) {}
 let showLines = true;
 try { if (localStorage.getItem('skyLines') === '0') showLines = false; } catch (e) {}
 let starSel = null, starDrawn = [], starNext = 0, bodyNow = {}, starListObjs = [];
@@ -2072,8 +2118,10 @@ function setMode(m) {
   $('tabStars').setAttribute('aria-selected', String(m === 'stars'));
   $('tabSun').setAttribute('aria-selected', String(m === 'sun'));
   $('tabLtg').setAttribute('aria-selected', String(m === 'ltg'));
+  $('tabEq').setAttribute('aria-selected', String(m === 'eq'));
   try { localStorage.setItem('skyMode', m); } catch (e) {}
-  if (m === 'sun' || m === 'ltg') exitZoom();
+  if (m === 'sun' || m === 'ltg' || m === 'eq') exitZoom();
+  if (m === 'eq') { eqNext = 0; if (eqMap) setTimeout(() => eqMap.resize(), 50); }
   if (m === 'ltg' && ltgMap) setTimeout(() => ltgMap.resize(), 50);
   starNext = 0; lastSlow = 0; sunNext = 0;
 }
@@ -2496,10 +2544,146 @@ function ltgFrame() {
   }
 }
 
+/* ====================================================================
+   QUAKES TAB: the nearest earthquake in a chosen period and above a
+   chosen strength, the strongest within 1,000 km and worldwide, on a map.
+   ==================================================================== */
+function eqDist(a1, o1, a2, o2) { return distKm({ lat: a1, lon: o1 }, { lat: a2, lon: o2 }); }
+function eqBearing(a1, o1, a2, o2) {
+  const y = Math.sin((o2 - o1) * D2R) * Math.cos(a2 * D2R);
+  const x = Math.cos(a1 * D2R) * Math.sin(a2 * D2R) - Math.sin(a1 * D2R) * Math.cos(a2 * D2R) * Math.cos((o2 - o1) * D2R);
+  return (Math.atan2(y, x) * R2D + 360) % 360;
+}
+let eq = { key: '', t: 0, data: null, busy: false, err: '' }, eqMap = null, eqLayers = null, eqNext = 0;
+function eqStart(period) {
+  const now = new Date();
+  const d = period === 'day' ? new Date(now - 864e5) : period === 'week' ? new Date(now - 7 * 864e5)
+          : period === 'month' ? new Date(now - 30 * 864e5) : new Date(Date.UTC(now.getFullYear(), 0, 1));
+  return d.toISOString().slice(0, 16) + ':00';
+}
+function eqColour(m) { return m < 2 ? '#7CC4FF' : m < 3 ? '#9FE3A0' : m < 4 ? '#F2D36B' : m < 5 ? '#FFB45C' : m < 6 ? '#FF8A5C' : '#FF5C5C'; }
+function eqFeltKm(m) { return Math.pow(10, 0.43 * m - 0.3); }   // rough distance people usually notice it
+function eqAgo(t) {
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 60) return m + ' min ago';
+  const h = Math.round(m / 60);
+  if (h < 36) return h + (h === 1 ? ' hour ago' : ' hours ago');
+  const d = Math.round(h / 24);
+  return d + (d === 1 ? ' day ago' : ' days ago');
+}
+function eqPlace(q) {
+  const p = (q.place || '').trim();
+  if (!p) return 'Unknown place';
+  if (p !== p.toUpperCase()) return p;                       // already written normally (USGS)
+  const small = { of: 1, and: 1, the: 1, off: 1, near: 1, coast: 0 };
+  return p.toLowerCase().split(/(\s+|-|,|\(|\))/).map((w, i) => {
+    if (/^(uk|usa|u\.s\.)$/.test(w)) return w.toUpperCase();
+    if (i && small[w]) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }).join('');
+}
+function eqWhen(q) {
+  return new Date(q.t).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) +
+         (new Date(q.t).getFullYear() !== new Date().getFullYear() ? ' ' + new Date(q.t).getFullYear() : '');
+}
+function eqCard(el, q, emptyText) {
+  el.textContent = '';
+  if (!q) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = emptyText; el.append(p); return; }
+  const l = loc || DEFAULT_LOC;
+  const d = q.d != null ? q.d : eqDist(l.lat, l.lon, q.lat, q.lon);
+  const b = document.createElement('div'); b.className = 'eqMag'; b.style.background = eqColour(q.mag); b.textContent = q.mag.toFixed(1);
+  const w = document.createElement('div'); w.className = 'what';
+  const t = document.createElement('p'); t.className = 'big';
+  t.textContent = (d < 1 ? 'Right beneath you' : Math.round(d).toLocaleString() + ' km ' + compass(eqBearing(l.lat, l.lon, q.lat, q.lon))) +
+                  ', ' + eqPlace(q);
+  const sub = document.createElement('p'); sub.className = 'hint'; sub.style.margin = '0';
+  const felt = eqFeltKm(q.mag);
+  sub.textContent = eqAgo(q.t) + ' (' + eqWhen(q) + ')' + (q.depth != null ? ', ' + Math.round(q.depth) + ' km deep' : '') +
+    '. Magnitude ' + q.mag.toFixed(1) + (q.magType ? ' ' + q.magType : '') + ', usually felt within about ' +
+    (felt < 10 ? felt.toFixed(0) : Math.round(felt / 5) * 5) + ' km' + (d < felt ? ': you may well have felt it.' : '.');
+  w.append(t, sub);
+  if (q.url) { const a = document.createElement('a'); a.href = q.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Details';
+               const pa = document.createElement('p'); pa.style.margin = '4px 0 0'; pa.append(a); w.append(pa); }
+  el.append(b, w);
+}
+function eqShowLoading() {
+  $('eqNearest').textContent = '';
+  const p = document.createElement('p'); p.className = 'big'; p.textContent = 'Looking for earthquakes…'; $('eqNearest').append(p);
+  $('eqStrong').textContent = ''; $('eqWorld').textContent = '';
+}
+function eqLoad() {
+  const l = loc || DEFAULT_LOC, period = $('eqPeriod').value, min = Number($('eqMin').value);
+  const key = l.lat.toFixed(2) + ',' + l.lon.toFixed(2) + '|' + period + '|' + min;
+  if (eq.busy || (eq.key === key && Date.now() - eq.t < 5 * 60000)) return;
+  eq.busy = true;
+  google.script.run
+    .withSuccessHandler(t => { eq = { key, t: Date.now(), data: JSON.parse(t), busy: false, err: '' }; eqRender(); })
+    .withFailureHandler(err => { eq = Object.assign(eq, { key, t: Date.now() - 4 * 60000, busy: false,
+                                   err: (err && err.message) || String(err) }); eqRender(); })
+    .getQuakes(l.lat, l.lon, eqStart(period), min);
+}
+function eqEnsureMap() {
+  if (eqMap) return;
+  eqMap = SkyMap.create($('eqMap'), { minZoom: 2, maxZoom: 10 });
+  if (!eqMap) return;
+  eqLayers = { marks: eqMap.group(), me: eqMap.group(), key: '' };
+}
+function eqRender() {
+  const per = { day: 'in the last 24 hours', week: 'in the last week', month: 'in the last month', year: 'this year' }[$('eqPeriod').value];
+  const min = Number($('eqMin').value), sz = min ? ' of magnitude ' + min + ' or more' : '';
+  if (eq.err && !eq.data) {
+    eqCard($('eqNearest'), null, 'Couldn’t get earthquake data right now (' + eq.err + '). Trying again shortly.');
+    return;
+  }
+  const d = eq.data;
+  if (!d) return;
+  eqCard($('eqNearest'), d.nearest, 'No earthquakes' + sz + ' found ' + per + '.');
+  eqCard($('eqStrong'), d.strongestNear, 'None within 1,000 km' + sz + ' ' + per + '.');
+  eqCard($('eqWorld'), d.world, 'No magnitude 4.5+ earthquakes reported ' + per + '.');
+  const ul = $('eqList'); ul.textContent = '';
+  d.list.slice(0, 12).forEach(q => {
+    const li = document.createElement('li');
+    const left = document.createElement('span'); left.textContent = 'M' + q.mag.toFixed(1) + ', ' + Math.round(q.d).toLocaleString() + ' km';
+    const when = document.createElement('span'); when.className = 'when'; when.textContent = eqPlace(q) + ' · ' + eqAgo(q.t);
+    left.append(' ', when);
+    li.append(left); ul.append(li);
+  });
+  $('eqWhen').textContent = d.count + ' earthquake' + (d.count === 1 ? '' : 's') + sz + ' within 1,000 km ' + per +
+    '. Checked ' + eqAgo(d.t).replace('0 min ago', 'just now') + '; updates every 5 minutes.' + (eq.err ? ' (Last update failed: ' + eq.err + ')' : '');
+  eqEnsureMap();
+  if (eqLayers) {
+    const l = loc || DEFAULT_LOC;
+    eqLayers.marks.clear(); eqLayers.me.clear();
+    const span = Date.now() - Date.parse(eqStart($('eqPeriod').value));
+    d.list.slice().reverse().forEach(q => {
+      const fresh = Math.max(0.35, 1 - (Date.now() - q.t) / span);
+      eqLayers.marks.dot(q.lat, q.lon, Math.max(4, 3 + q.mag * 2.2), { color: eqColour(q.mag), weight: 1.5, opacity: fresh,
+        fill: eqColour(q.mag), fillOpacity: fresh * 0.45 }, 'M' + q.mag.toFixed(1) + ', ' + eqPlace(q) + ', ' + eqAgo(q.t));
+    });
+    eqLayers.me.dot(l.lat, l.lon, 5, { color: '#C8A55E', weight: 2, fill: '#0C1726' }, 'You');
+    const k = eq.key;
+    if (eqLayers.key !== k) {                                 // frame you and the nearest quake
+      eqLayers.key = k;
+      const far = d.nearest ? Math.max(60, d.nearest.d * 1.3) : 500;
+      eqMap.view(l.lat, l.lon, Math.min(far, 2500));
+    }
+  }
+}
+function eqFrame() {
+  const t = Date.now();
+  if (t < eqNext) return;
+  eqNext = t + 1000;
+  $('clock').textContent = new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  eqEnsureMap();
+  eqLoad();
+  if (eq.data && Math.floor(t / 1000) % 60 === 0) eqRender();    // keep the "… ago" times fresh
+}
+
 function frame() {
   if (mode === 'stars') { if (typeof Astronomy !== 'undefined') starFrame(false); }
   else if (mode === 'sun') sunFrame();
   else if (mode === 'ltg') ltgFrame();
+  else if (mode === 'eq') eqFrame();
   else satFrame();
   requestAnimationFrame(frame);
 }
@@ -3299,6 +3483,12 @@ $('skySel').addEventListener('change', () => {
 $('tabStars').addEventListener('click', () => setMode('stars'));
 $('tabSun').addEventListener('click', () => setMode('sun'));
 $('tabLtg').addEventListener('click', () => setMode('ltg'));
+$('tabEq').addEventListener('click', () => setMode('eq'));
+['eqPeriod', 'eqMin'].forEach(id => $(id).addEventListener('change', () => {
+  try { localStorage.setItem(id, $(id).value); } catch (e) {}
+  eq.key = ''; eqNext = 0; eqShowLoading();
+}));
+['eqPeriod', 'eqMin'].forEach(id => { try { const v = localStorage.getItem(id); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; } catch (e) {} });
 $('fbBtn').addEventListener('click', flashBang);
 $('redBtn').addEventListener('click', () => {
   redOn = !redOn;

@@ -222,7 +222,70 @@
     return out;
   }
 
+  // Earthquakes near you and the strongest worldwide (EMSC + USGS); kept for 5 minutes
+  async function getQuakes(lat, lon, start, minmag) {
+    lat = Number(lat); lon = Number(lon); minmag = Number(minmag) || 0; start = String(start);
+    if (!isFinite(lat) || !isFinite(lon) || !/^\d{4}-\d\d-\d\dT/.test(start)) throw new Error('Bad request');
+    const key = 'eq_' + lat.toFixed(2) + '_' + lon.toFixed(2) + '_' + start.slice(0, 13) + '_' + minmag, hit = await cacheGet(key);
+    if (hit) return hit;
+    const get = async (url, src) => {
+      const r = await http(url);
+      if (r.status === 204) return [];
+      if (r.status !== 200) throw new Error((src === 'usgs' ? 'USGS' : 'EMSC') + ' returned ' + r.status);
+      return quakeParse_(r.text, src);
+    };
+    const lists = await Promise.all([get(quakeUrlEmsc_(lat, lon, start, minmag, 3, 2000), 'emsc'),
+                                     get(quakeUrlEmsc_(lat, lon, start, Math.max(minmag, 2.5), 9, 2000), 'emsc')]);
+    if (!lists[0].length && !lists[1].length) lists.push(await get(quakeUrlEmsc_(lat, lon, start, Math.max(minmag, 4), 180, 2000), 'emsc'));
+    let world = null;
+    try { world = (await get(quakeUrlUsgsBiggest_(start, minmag), 'usgs'))[0] || null; } catch (e) {}
+    const out = JSON.stringify(Object.assign(quakeSummary_(lat, lon, lists), { world, t: Date.now() }));
+    await cachePut(key, out, 300);
+    return out;
+  }
+
   // ---- shared helpers (same code as the Apps Script version) ----
+  // ---- earthquakes: shared helpers (EMSC SeismicPortal, CC BY 4.0; USGS, public domain) ----
+  function quakeUrlEmsc_(lat, lon, start, minmag, maxradiusDeg, limit) {
+    return 'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&nodata=204&orderby=time' +
+      '&lat=' + lat.toFixed(3) + '&lon=' + lon.toFixed(3) + '&maxradius=' + maxradiusDeg +
+      '&start=' + encodeURIComponent(start) + (minmag > 0 ? '&minmag=' + minmag : '') + '&limit=' + limit;
+  }
+  function quakeUrlUsgsBiggest_(start, minmag) {
+    return 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&orderby=magnitude&limit=1' +
+      '&starttime=' + encodeURIComponent(start) + '&minmagnitude=' + Math.max(minmag, 4.5);
+  }
+  // One tidy shape for both feeds' GeoJSON
+  function quakeParse_(text, src) {
+    if (!text || !text.trim()) return [];
+    const j = JSON.parse(text);
+    return (j.features || []).map(f => {
+      const p = f.properties || {}, g = (f.geometry && f.geometry.coordinates) || [];
+      const lat = Number(g[1] != null ? g[1] : (p.lat != null ? p.lat : p.Latitude));
+      const lon = Number(g[0] != null ? g[0] : (p.lon != null ? p.lon : p.Longitude));
+      const depth = Math.abs(Number(p.depth != null ? p.depth : (p.Depth != null ? p.Depth : g[2])));
+      const t = src === 'usgs' ? Number(p.time) : Date.parse(p.time || p.Time);
+      const place = src === 'usgs' ? (p.place || '') : (p.flynn_region || p.EventLocationName || '');
+      return { t, lat, lon, depth: isFinite(depth) ? depth : null, mag: Number(p.mag != null ? p.mag : p.Magnitude),
+               magType: p.magtype || p.magType || p.MagType || '', place: String(place),
+               id: String(p.unid || p.source_id || p.EventID || f.id || ''), src,
+               url: src === 'usgs' ? (p.url || '') : (p.unid ? 'https://www.seismicportal.eu/eventdetails.html?unid=' + p.unid : '') };
+    }).filter(q => isFinite(q.lat) && isFinite(q.lon) && isFinite(q.mag) && isFinite(q.t) && (q.src === 'usgs' || !/quarry|explosion/i.test(q.place)));
+  }
+  // Pick out what the Quakes tab shows
+  function quakeSummary_(lat, lon, lists) {
+    const seen = {}, all = [];
+    [].concat(...lists).forEach(q => {
+      const k = q.id || (q.t + ',' + q.lat.toFixed(2) + ',' + q.lon.toFixed(2));
+      if (seen[k]) return; seen[k] = 1;
+      q.d = Math.round(distKm_(lat, lon, q.lat, q.lon) * 10) / 10;
+      all.push(q);
+    });
+    all.sort((a, b) => a.d - b.d);
+    const near = all.filter(q => q.d <= 1000);
+    const strongestNear = near.slice().sort((a, b) => b.mag - a.mag || b.t - a.t)[0] || null;
+    return { nearest: all[0] || null, strongestNear, list: all.slice(0, 40), count: near.length };
+  }
   // Lightning layers to try, sharpest first. "li_af" (Accumulated Flashes) marks just the centre of
   // each flash; "li_afa" (Accumulated Flash Area) spreads each flash over the whole patch of cloud it lit.
   const LTG_LAYERS_ = [{ name: 'mtg_fd:li_af', reach: 3, centres: true }, { name: 'mtg_fd:li_afa', reach: 1, centres: false }];
@@ -412,7 +475,7 @@
     }).filter(p => isFinite(p.lat) && isFinite(p.lon));
   }
 
-  const API = { getTles, searchSats, nearestPlace, getTides, getLightning, getWiki, getSatInfo, getSkyBrightness };
+  const API = { getTles, searchSats, nearestPlace, getTides, getLightning, getWiki, getSatInfo, getSkyBrightness, getQuakes };
   window.SKY_LOCAL = API;
 
   // Stand-in for Apps Script's google.script.run, so the page works unchanged
